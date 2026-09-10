@@ -225,6 +225,10 @@ def _clean(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     text = re.sub("[\\uE000-\\uF8FF]", "", text)
     text = text.replace("\u2019", "'").replace("\u2013", "-").replace("\u2014", "-")
+    # Readers disagree about spacing around a slash -- "Piano/ Vocal" against
+    # "Piano/Vocal". It means nothing in a part name, so settle it here and
+    # let one alias cover both.
+    text = re.sub(r"\s*/\s*", "/", text)
     return re.sub(r"\s+", " ", text).strip()
 
 

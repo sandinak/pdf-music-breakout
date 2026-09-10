@@ -5,7 +5,7 @@
 
 PYTHON   ?= python3
 PORT     ?= 8756
-APP_DEST ?= $(HOME)/Applications
+APP_DEST ?= /Applications
 
 VENV    := .venv
 BIN     := $(VENV)/bin
@@ -15,6 +15,11 @@ FORMULA := Formula/pdf-music-breakout.rb
 REPO    := https://github.com/sandinak/pdf-music-breakout
 TAP     := sandinak/tap
 VERSION  = $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' $(MODULE))
+APP_NAME := PDF Music Breakout
+APP_SRC  := $(wildcard macapp/Sources/*.swift)
+# Make splits target names on spaces, so build under a plain name and only
+# use the display name when installing.
+APP_OUT  := build/PDFMusicBreakout.app
 # Whether VERSION was supplied on the command line, so `release` can insist.
 VERSION_GIVEN := $(filter command line,$(origin VERSION))
 TARBALL  = $(REPO)/archive/refs/tags/v$(VERSION).tar.gz
@@ -71,8 +76,31 @@ uninstall: ## Remove the uv/pipx installation
 	@if command -v uv >/dev/null 2>&1; then uv tool uninstall pdf-music-breakout || true; fi
 	@if command -v pipx >/dev/null 2>&1; then pipx uninstall pdf-music-breakout || true; fi
 
-app: ## Build the macOS launcher app (APP_DEST=~/Applications)
-	@./packaging/make-app.sh "$(APP_DEST)"
+# ------------------------------------------------------------------ mac app
+
+$(APP_OUT)/Contents/MacOS/PDFMusicBreakout: $(APP_SRC) macapp/Info.plist.in
+	@echo "==> building $(APP_NAME) $(VERSION)"
+	@mkdir -p $(APP_OUT)/Contents/MacOS $(APP_OUT)/Contents/Resources
+	@sed 's/@VERSION@/$(VERSION)/g' macapp/Info.plist.in > $(APP_OUT)/Contents/Info.plist
+	@swiftc -O -parse-as-library $(APP_SRC) -o $@
+	@codesign --force --sign - $(APP_OUT) 2>/dev/null || echo "    (unsigned)"
+
+app: $(APP_OUT)/Contents/MacOS/PDFMusicBreakout ## Build the native macOS app
+	@echo "built: $(APP_OUT)"
+
+app-run: app ## Build and launch the app
+	@open $(APP_OUT)
+
+app-install: app ## Install the app into /Applications
+	@rm -rf "$(APP_DEST)/$(APP_NAME).app"
+	@cp -R $(APP_OUT) "$(APP_DEST)/$(APP_NAME).app"
+	@echo "installed: $(APP_DEST)/$(APP_NAME).app"
+
+app-verify: ## Check the app's detection matches the Python implementation
+	@mkdir -p build
+	@swiftc -O macapp/Sources/Naming.swift macapp/Sources/Detection.swift \
+		macapp/Sources/Splitter.swift macapp/Tools/main.swift -o build/verify
+	@echo "built build/verify -- run it against a PDF to compare with 'make split'"
 
 # ------------------------------------------------------------------- homebrew
 
@@ -146,6 +174,7 @@ help: ## Show this help
 	@echo
 	@echo "  variables: PDF= OUT= PORT=$(PORT) APP_DEST=$(APP_DEST)"
 
-.PHONY: dev test test-v lint serve split install uninstall app \
+.PHONY: dev test test-v lint serve split install uninstall \
+        app app-run app-install app-verify \
         brew-tap brew-install brew-reinstall brew-test brew-uninstall \
         formula-sha dist release clean distclean help

@@ -50,16 +50,15 @@ class PdfMusicBreakout < Formula
     end
 
     venv.pip_install_and_link buildpath
-    pkgshare.install "packaging/make-app.sh"
   end
 
   def caveats
     <<~EOS
-      To review and correct the split before writing files:
+      To review and correct the split in a browser before writing files:
         pdf-music-breakout --serve
 
-      For a double-clickable launcher in ~/Applications:
-        #{opt_pkgshare}/make-app.sh
+      There is also a native Mac app, built from a checkout with `make
+      app-install`. It needs no Python and is not installed by this formula.
     EOS
   end
 

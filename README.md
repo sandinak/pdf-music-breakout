@@ -54,26 +54,29 @@ Check it landed:
 pdf-music-breakout --version
 ```
 
-### A double-clickable app
+## The Mac app
 
-For the people who will never open a terminal, build a launcher that opens
-the review screen:
-
-```bash
-make app                        # into ~/Applications
-make app APP_DEST=/Applications # or system-wide
-```
-
-Installed via Homebrew there's no checkout to run `make` in, so the same
-builder ships alongside it:
+There's a native macOS app — a real `.app` that lives in `/Applications`, not
+a browser window. Build and install it from a checkout:
 
 ```bash
-$(brew --prefix)/share/pdf-music-breakout/make-app.sh
+make app-install        # into /Applications
+make app-run            # or just build and launch it
 ```
 
-The app is a thin wrapper around `pdf-music-breakout --serve`, so install the
-command first. It finds the command even though the Finder launches apps with
-a bare PATH.
+Open a combined PDF by dropping it on the window, double-clicking it in the
+Finder, or dropping it on the Dock icon. You get a thumbnail of every page
+with the detected part boundaries marked; tick or untick a page to add or
+remove a boundary, rename anything that came out wrong, and the list of files
+updates as you go. Export writes one PDF per part into a folder you choose.
+
+It is written in Swift against Apple's own PDFKit, so it carries **no Python
+and no third-party dependencies at all** — nothing to install first, and none
+of the licence constraints described below.
+
+Its detection is a port of the Python one, and `make app-verify` builds a
+harness that checks the two agree; they currently produce identical results
+on every real file tested.
 
 ## The review screen
 
@@ -212,7 +215,9 @@ Full list: `pdf_music_breakout.py --help`
 | `make test` | run the test suite |
 | `make serve` | run the review UI from the working tree |
 | `make split PDF=x.pdf` | split a file without installing (add `OUT=dir` to write) |
-| `make app` | build the macOS launcher |
+| `make app` | build the native Mac app |
+| `make app-install` | build it and install into /Applications |
+| `make app-verify` | check the app's detection matches the Python one |
 | `make install` | put it on PATH with uv or pipx |
 | `make brew-install` | tap this repo and install through Homebrew |
 | `make release VERSION=x.y.z` | bump, tag, push, and repoint the formula |
@@ -241,18 +246,14 @@ dirty tree, and refuses entirely if you don't name a version.
 
 AGPL-3.0-or-later.
 
-This is not a free choice: the tool reads and writes PDFs with
+For the Python CLI this is not a free choice: it reads and writes PDFs with
 [PyMuPDF](https://pymupdf.readthedocs.io/), which is dual-licensed AGPL-3.0 or
 paid-commercial by Artifex. Anything distributed that links it must be AGPL
-too.
+too — which also rules out shipping it as a closed-source or paid app, since
+the Mac App Store does not get along with AGPL terms.
 
-That matters if you ever want to ship this as a closed-source or paid app —
-the Mac App Store in particular does not get along with AGPL terms. Two ways
-out, should it come to that:
-
-- Swap the PDF layer for a permissive stack: `pypdf` (BSD) for writing pages
-  plus `pdfminer.six` (MIT) for positioned text extraction.
-- On Apple platforms, use PDFKit, which does all of this natively with no
-  third-party licence at all.
-
-Neither affects using or sharing the tool as it stands.
+**The Mac app is not affected.** It uses Apple's PDFKit and links nothing
+third-party, so it carries no such constraint. That was a deliberate reason
+to write it in Swift rather than wrap the Python: if this ever wants to be a
+signed download or an iPad app, the native side is already clear of the
+problem.
