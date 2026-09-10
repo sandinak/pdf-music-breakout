@@ -18,9 +18,19 @@ Abracadabra-ALL.pdf  (30 pages)
    └── … 15 parts in total
 ```
 
+It comes in four shapes, all doing the same job by the same rules:
+
+| | |
+|---|---|
+| **Mac app** | a native window — [download](https://github.com/sandinak/pdf-music-breakout/releases/latest), or `make app-install` |
+| **Windows app** | the same review screen in a window — [download](https://github.com/sandinak/pdf-music-breakout/releases/latest) |
+| **In a browser** | `pdf-music-breakout --serve book.pdf`, on any platform |
+| **Command line** | `pdf-music-breakout book.pdf -o parts/` |
+
 ## Install
 
-Any of these puts a `pdf-music-breakout` command on your PATH.
+The Homebrew, uv and pipx routes put a `pdf-music-breakout` command on your
+PATH; the two Windows downloads need nothing installed first.
 
 **Homebrew** — this repository doubles as its own tap, so there's no separate
 tap repo to add:
@@ -319,9 +329,12 @@ app reading a page number as part of an instrument's name.
 
 ### Tests
 
-64 of them. They build synthetic PDFs shaped like real engraver output and
+71 of them. They build synthetic PDFs shaped like real engraver output and
 check detection, naming, page fitting, the CLI, and the review UI (which runs
 a real server on a loopback port and is driven the way the page drives it).
+
+`tools/sample_book.py` writes a longer one — a cover, a landscape score and
+eleven parts — for trying things by hand: `make sample`.
 
 Several tests exist because a real file broke the tool in that exact way;
 those are marked as regressions in their docstrings.
