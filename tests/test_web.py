@@ -18,7 +18,6 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,7 @@ import breakout_web
 @pytest.fixture
 def server():
     breakout_web.Handler.state = breakout_web.State()
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), breakout_web.Handler)
+    httpd = breakout_web.Server(("127.0.0.1", 0), breakout_web.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}"
     httpd.shutdown()
@@ -104,7 +103,7 @@ def test_a_file_can_be_opened_into_the_ui(band_book):
     breakout_web.Handler.state = breakout_web.State()
     breakout_web.Handler.opened = breakout_web.analyse(
         breakout_web.Handler.state, band_book.read_bytes(), band_book.name)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), breakout_web.Handler)
+    httpd = breakout_web.Server(("127.0.0.1", 0), breakout_web.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         base = f"http://127.0.0.1:{httpd.server_address[1]}"

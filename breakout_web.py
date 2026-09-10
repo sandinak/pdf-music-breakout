@@ -23,6 +23,7 @@ import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -374,6 +375,23 @@ class Handler(BaseHTTPRequestHandler):
                    {"Content-Disposition": f'attachment; filename="{stem}"'})
 
 
+class Server(ThreadingHTTPServer):
+    """The review UI's server, minus one lookup we have no use for.
+
+    `HTTPServer.server_bind` calls `socket.getfqdn()` to name the host it is
+    serving as. That is a reverse DNS lookup, and on a machine whose network
+    is unhelpful about them it blocks for tens of seconds -- during which the
+    server has bound its port but said nothing, so anything waiting to be
+    told where it is (the desktop shell, or a person reading the terminal)
+    sees a hang. We serve on loopback and never use the name.
+    """
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
+
+
 def _free_port(preferred: int) -> int:
     with socket.socket() as sock:
         try:
@@ -399,7 +417,7 @@ def serve(port: int = 8756, open_browser: bool = True,
     if source is not None:
         Handler.opened = analyse(Handler.state, Path(source).read_bytes(),
                                  Path(source).name)
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    httpd = Server(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
     # Flushed, because something is usually reading this: a wrapper that
     # starts the server and waits to be told where it is sees nothing at all
