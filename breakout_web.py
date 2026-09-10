@@ -660,6 +660,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, c =>
 let sid = null, pages = [], owners = [], detected = [];
 let groups = [], expanded = new Set(), planTimer = null;
 let sel = null;                       // "g:<key>" or "p:<index>"
+let lastPage = null;                  // survives a rename, which renames keys
 let zoomMode = 'width', zoomFactor = 1;
 
 function notice(msg, kind) {
@@ -781,13 +782,16 @@ function dropped(payload, targetKey) {
     moved = g ? g.pages.slice() : [];
   }
   if (!moved.length) return;
-  const target = groups.find(x => x.key === targetKey.slice(2));
-  if (targetKey.startsWith('p:') || !target) {
-    const g = groupOf(+targetKey.slice(2));
-    if (!g || moved.includes(+targetKey.slice(2))) return;
-    return assign(moved, g);
+  if (targetKey.startsWith('g:')) {
+    const target = groups.find(x => x.key === targetKey.slice(2));
+    if (target) assign(moved, target);
+    return;
   }
-  assign(moved, target);
+  // A page stands in for the part it is in, so dropping onto one means
+  // "put this with that page".
+  const onto = +targetKey.slice(2);
+  const g = groupOf(onto);
+  if (g && !moved.includes(onto)) assign(moved, g);
 }
 
 function assign(idxs, group) {
@@ -818,7 +822,9 @@ function splitAt(i) {
 function rename(group, value) {
   const name = value.trim();
   if (!name || name === group.label) return;
-  owners = owners.map(o => (o === group.label ? name : o));
+  // By page, not by matching the old text: two spellings can normalise into
+  // one part, and only the first of them is the label on show.
+  group.pages.forEach(i => { owners[i] = name; });
   plan();
 }
 
@@ -936,6 +942,7 @@ function showPreview() {
     return;
   }
   none.classList.add('hide'); img.classList.remove('hide');
+  lastPage = i;
 
   const p = pages[i], pane = $('previewPane');
   const paneW = Math.max(200, pane.clientWidth - 24);
@@ -1039,6 +1046,12 @@ function plan() {
                     front: true, pages: data.front.map(n => n - 1) });
     groups.sort((a, b) => a.pages[0] - b.pages[0]);
     if (sel === null && groups.length) sel = 'g:' + groups[0].key;
+    // Renaming a part changes its key, which would otherwise leave the
+    // preview pointing at a group that no longer exists.
+    if (selPage() === null && lastPage !== null) {
+      const g = groupOf(lastPage);
+      sel = g && g.pages[0] === lastPage ? 'g:' + g.key : 'p:' + lastPage;
+    }
 
     renderTree();
     showPreview();
