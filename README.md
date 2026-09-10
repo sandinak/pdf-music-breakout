@@ -22,12 +22,15 @@ Abracadabra-ALL.pdf  (30 pages)
 
 Any of these puts a `pdf-music-breakout` command on your PATH.
 
-**Homebrew** — via the tap:
+**Homebrew** — this repository doubles as its own tap, so there's no separate
+tap repo to add:
 
 ```bash
-brew tap sandinak/tap https://github.com/sandinak/homebrew-tap
+brew tap sandinak/tap https://github.com/sandinak/pdf-music-breakout
 brew install sandinak/tap/pdf-music-breakout
 ```
+
+To upgrade later: `brew update && brew upgrade pdf-music-breakout`.
 
 **uv** or **pipx**, straight from this repository:
 
