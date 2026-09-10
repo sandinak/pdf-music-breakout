@@ -49,6 +49,29 @@ def loaded(server, band_book):
 # --------------------------------------------------------------------------
 
 
+def test_a_file_can_be_opened_into_the_ui(band_book):
+    """`--serve book.pdf` lands on the parts, with nothing to drop.
+
+    This is how opening a PDF with the app has to work on a machine with no
+    terminal to type a path into.
+    """
+    breakout_web.Handler.state = breakout_web.State()
+    breakout_web.Handler.opened = breakout_web.analyse(
+        breakout_web.Handler.state, band_book.read_bytes(), band_book.name)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), breakout_web.Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        opened = json.load(urllib.request.urlopen(base + "/api/opened"))
+        assert opened["title"] == "Test Song"
+        assert len(opened["pages"]) == 6
+        assert opened["owners"][1] == "Full Score"
+    finally:
+        breakout_web.Handler.opened = None
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_page_is_served(server):
     html = urllib.request.urlopen(server + "/").read().decode()
     assert "<title>PDF Music Breakout</title>" in html
@@ -80,6 +103,53 @@ def test_thumbnails_render_as_png(loaded):
     base, data = loaded
     blob = urllib.request.urlopen(f"{base}/api/thumb/{data['sid']}/0").read()
     assert blob.startswith(b"\x89PNG\r\n")
+
+
+def test_analyze_says_who_owns_every_page(loaded):
+    """The tree needs an owner per page, not just where parts begin."""
+    _, data = loaded
+    assert data["owners"] == [
+        None, "Full Score", "Full Score", "Piano/Vocal",
+        "Alto Saxophone", "Drum Set",
+    ]
+
+
+def test_preview_renders_a_page_larger_than_its_thumbnail(loaded):
+    base, data = loaded
+    small = urllib.request.urlopen(f"{base}/api/thumb/{data['sid']}/1").read()
+    big = urllib.request.urlopen(f"{base}/api/page/{data['sid']}/1?w=1400").read()
+    assert big.startswith(b"\x89PNG\r\n")
+    assert len(big) > len(small), "a preview that is no bigger cannot be read"
+
+
+def test_ownership_can_move_one_page_between_parts(loaded):
+    """What a drag does, and what per-page labels cannot say.
+
+    Page 4 belongs to the piano and page 5 to the sax; moving page 4 into the
+    sax part leaves the piano with nothing and the sax with two pages, which
+    is not expressible as "this page starts a part".
+    """
+    base, data = loaded
+    owners = list(data["owners"])
+    owners[3] = "Alto Saxophone"
+    plan = json.load(_post(base, "/api/plan", {
+        "sid": data["sid"], "owners": owners, "title": "Test Song",
+    }))
+    by_name = {f["name"]: f for f in plan["files"]}
+    assert "Piano" not in by_name, "its only page went to the saxophone"
+    assert by_name["Alto_Sax"]["pages"] == [4, 5]
+
+
+def test_a_page_can_be_dropped_into_the_front_matter(loaded):
+    """Front matter is no longer only the pages before the first part."""
+    base, data = loaded
+    owners = list(data["owners"])
+    owners[5] = None
+    plan = json.load(_post(base, "/api/plan", {
+        "sid": data["sid"], "owners": owners, "title": "Test Song",
+    }))
+    assert plan["front"] == [1, 6]
+    assert "Drums" not in {f["name"] for f in plan["files"]}
 
 
 def test_plan_names_the_files_that_would_be_written(loaded):

@@ -557,35 +557,57 @@ def detect_page_labels(doc, band: float, boiler_threshold: float,
     return labels, title
 
 
-def group_labels(labels: list[str | None], aliases: dict[str, str],
-                 n_pages: int) -> tuple[list[Part], list[int]]:
-    """Turn per-page labels into parts, plus any leading front matter.
+def own_pages(labels: list[str | None], n_pages: int) -> list[str | None]:
+    """Say which part each page belongs to, not just where parts begin.
 
-    An unlabelled page continues the part above it. Parts are grouped by
-    normalised name, so one interrupted and resumed later lands in a single
-    file rather than two.
+    A page with no name of its own continues the part above it. Naming the
+    owner of every page is what lets one page be moved between parts without
+    disturbing its neighbours, which is how the review UIs offer a drag.
     """
-    first = next((i for i, lab in enumerate(labels) if lab), None)
-    if first is None:
-        return [], list(range(n_pages))
-    front = list(range(first))
+    owners: list[str | None] = []
+    current: str | None = None
+    for i in range(n_pages):
+        label = labels[i] if i < len(labels) else None
+        if label:
+            current = label
+        owners.append(current)
+    return owners
 
+
+def group_owners(owners: list[str | None], aliases: dict[str, str],
+                 n_pages: int) -> tuple[list[Part], list[int]]:
+    """Turn per-page ownership into parts, plus the pages owned by nobody.
+
+    Parts are grouped by normalised name, so one interrupted and resumed
+    later lands in a single file rather than two. A page owned by nobody is
+    front matter, wherever in the document it sits.
+    """
     parts: list[Part] = []
     index: dict[str, Part] = {}
-    current = None
-    for i in range(first, n_pages):
-        if labels[i]:
-            current = labels[i]
-        if not current:
+    front: list[int] = []
+    for i in range(n_pages):
+        owner = owners[i] if i < len(owners) else None
+        if not owner:
+            front.append(i)
             continue
-        name = normalise_name(current, aliases)
+        name = normalise_name(owner, aliases)
         part = index.get(name)
         if part is None:
-            part = Part(name, current, [])
+            part = Part(name, owner, [])
             index[name] = part
             parts.append(part)
         part.pages.append(i)
     return parts, front
+
+
+def group_labels(labels: list[str | None], aliases: dict[str, str],
+                 n_pages: int) -> tuple[list[Part], list[int]]:
+    """Turn per-page labels into parts, plus any leading front matter.
+
+    An unlabelled page continues the part above it, so the pages with no
+    owner are exactly the ones before the first label: the front matter.
+    """
+    return group_owners(own_pages(labels, n_pages), aliases, n_pages)
 
 
 def parts_from_headers(doc, aliases: dict[str, str], band: float,
@@ -833,7 +855,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.serve:
         import breakout_web
-        return breakout_web.serve(port=args.port, open_browser=not args.no_browser)
+        if args.source is not None and not args.source.is_file():
+            raise SystemExit(f"no such file: {args.source}")
+        return breakout_web.serve(port=args.port, open_browser=not args.no_browser,
+                                  source=args.source)
 
     if args.source is None:
         raise SystemExit("give a PDF to split, or use --serve for the review UI")
