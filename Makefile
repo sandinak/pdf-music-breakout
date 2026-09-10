@@ -234,6 +234,7 @@ release: ## Cut a release (make release VERSION=0.1.2)
 	@test -z "`git status --porcelain`" || { echo "working tree is dirty"; exit 1; }
 	@echo "==> releasing v$(VERSION)"
 	@sed -i '' 's/^__version__ = ".*"/__version__ = "$(VERSION)"/' $(MODULE)
+	@sed -i '' 's/^  "version": ".*"/  "version": "$(VERSION)"/' desktop/package.json
 	@$(MAKE) --no-print-directory test
 	@git add -A && git commit -q -m "Release v$(VERSION)" || true
 	@git tag -a "v$(VERSION)" -m "v$(VERSION)"
