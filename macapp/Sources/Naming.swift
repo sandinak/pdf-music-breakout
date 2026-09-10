@@ -107,6 +107,9 @@ enum Naming {
     static let filler = RE(#"\b(in|and|the|part|no|[a-g][b#]?|[0-9ivx]+)\b"#)
     static let slashSpacing = RE(#"\s*/\s*"#)
     static let trailingNumber = RE(#"\s+([0-9IVX]+)$"#, caseInsensitive: false)
+    /// A page number sharing a baseline with a part name, either side of it.
+    static let trailingBareNumber = RE(#"(\s+\d{1,3})\s*$"#)
+    static let leadingBareNumber = RE(#"^(\d{1,3}\s+)"#)
 
     /// Printed label -> output name, matched on the whole label.
     static let defaultAliases: [String: String] = [

@@ -92,6 +92,7 @@ enum Detection {
     /// the part name and the page number, and each keeps the outer edge it
     /// actually sits against.
     static func split(_ row: RawRow, title: String) -> [HeaderLine] {
+        let row = trimPageNumber(row)
         let whole = HeaderLine(text: row.text, x0: row.x0, x1: row.x1,
                                yTop: row.yTop, pageWidth: row.pageWidth)
         guard !title.isEmpty,
@@ -117,6 +118,39 @@ enum Detection {
                                   pageWidth: row.pageWidth))
         }
         return out.isEmpty ? [] : out
+    }
+
+    /// Take the page number off a row that is really two header items.
+    ///
+    /// A part name in one outer corner and a page number in the other share a
+    /// baseline, and PDFKit returns them as one line spanning the whole page:
+    /// "Score 1" for a four-page score. Left alone, every page of that part
+    /// gets a different name and becomes a file of its own. PyMuPDF reports
+    /// them as separate lines, which is why only this side needed telling.
+    ///
+    /// Width is what tells the two apart. A genuine "Trumpet 1" is a short
+    /// row in one corner; a name and a page number reach from margin to
+    /// margin. The remaining text keeps the corner it actually sits in, since
+    /// that is what marks it out as a part name later on.
+    static func trimPageNumber(_ row: RawRow) -> RawRow {
+        guard row.x1 - row.x0 > row.pageWidth * 0.6 else { return row }
+
+        if let number = Naming.trailingBareNumber.group(row.text, 1) {
+            let text = String(row.text.dropLast(number.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: " -–—,"))
+            guard !text.isEmpty else { return row }
+            // What is left sat at the left margin; the number held the right.
+            return RawRow(text: text, x0: row.x0, x1: row.x0,
+                          yTop: row.yTop, pageWidth: row.pageWidth)
+        }
+        if let number = Naming.leadingBareNumber.group(row.text, 1) {
+            let text = String(row.text.dropFirst(number.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: " -–—,"))
+            guard !text.isEmpty else { return row }
+            return RawRow(text: text, x0: row.x1, x1: row.x1,
+                          yTop: row.yTop, pageWidth: row.pageWidth)
+        }
+        return row
     }
 
     /// Text lines in the top `band` fraction of a page.
@@ -156,6 +190,12 @@ enum Detection {
             var seen = Set<String>()
             for text in Set(lines.map(\.text)) {
                 guard text.count >= 2, text.count <= 70, Int(text) == nil else { continue }
+                // An arranger credit or a copyright line sits on every page,
+                // while the title is printed only where a part begins -- so on
+                // a straight count of appearances the credit wins. It is never
+                // the title, so it does not get a vote.
+                if Naming.boilerplate.matchesPrefix(text) { continue }
+                if Naming.expression.matchesPrefix(text) { continue }
                 // The part name is not the title, however often it appears.
                 if !Naming.isInstrumentName(text) { seen.insert(text) }
                 // A running head reads "Song - Part - p.2", so its leading
