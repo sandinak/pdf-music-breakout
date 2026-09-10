@@ -20,10 +20,54 @@ Abracadabra-ALL.pdf  (30 pages)
 
 ## Install
 
+Any of these puts a `pdf-music-breakout` command on your PATH.
+
+**Homebrew** — via the tap:
+
 ```bash
-python3 -m venv .venv
-./.venv/bin/pip install -r requirements.txt
+brew tap sandinak/tap https://github.com/sandinak/homebrew-tap
+brew install sandinak/tap/pdf-music-breakout
 ```
+
+**uv** or **pipx**, straight from this repository:
+
+```bash
+uv tool install git+https://github.com/sandinak/pdf-music-breakout
+# or
+pipx install git+https://github.com/sandinak/pdf-music-breakout
+```
+
+**From a checkout**, for hacking on it:
+
+```bash
+git clone https://github.com/sandinak/pdf-music-breakout
+cd pdf-music-breakout
+python3 -m venv .venv
+./.venv/bin/pip install -e ".[dev]"
+```
+
+Check it landed:
+
+```bash
+pdf-music-breakout --version
+```
+
+### A double-clickable app
+
+For the people who will never open a terminal, build a launcher that opens
+the review screen:
+
+```bash
+./packaging/make-app.sh                 # into ~/Applications
+./packaging/make-app.sh /Applications   # or system-wide
+```
+
+Installed via Homebrew, the same script is at
+`$(brew --prefix)/share/pdf-music-breakout/make-app.sh`.
+
+The app is a thin wrapper around `pdf-music-breakout --serve`, so install the
+command first. It finds the command even though the Finder launches apps with
+a bare PATH.
 
 ## The review screen
 

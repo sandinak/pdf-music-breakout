@@ -13,8 +13,14 @@ set -euo pipefail
 DEST="${1:-$HOME/Applications}"
 APP="$DEST/PDF Music Breakout.app"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$HERE/../pyproject.toml" | head -1)"
-VERSION="${VERSION:-0.1.0}"
+# Prefer the installed command; fall back to the source tree when run from a
+# checkout. An installed copy has no pyproject.toml beside it, so this must
+# never be fatal.
+VERSION="$(pdf-music-breakout --version 2>/dev/null | awk '{print $2}' || true)"
+if [ -z "$VERSION" ]; then
+  VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$HERE/../pdf_music_breakout.py" 2>/dev/null | head -1 || true)"
+fi
+VERSION="${VERSION:-0}"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

@@ -25,6 +25,8 @@ pages in real scores look like.
 
 from __future__ import annotations
 
+__version__ = "0.1.1"
+
 import argparse
 import json
 import re
@@ -732,6 +734,8 @@ def build_parser() -> argparse.ArgumentParser:
   pdf_music_breakout.py book.pdf -o out --map "2-7=Full Score" --map "8-14=Piano/Vocal"
 """,
     )
+    p.add_argument("--version", action="version",
+                   version=f"pdf-music-breakout {__version__}")
     p.add_argument("source", type=Path, nargs="?",
                    help="the combined PDF to split (omit when using --serve)")
     p.add_argument("--serve", action="store_true",
