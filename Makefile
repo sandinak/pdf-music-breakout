@@ -78,7 +78,7 @@ uninstall: ## Remove the uv/pipx installation
 
 # ------------------------------------------------------------------ mac app
 
-$(APP_OUT)/Contents/MacOS/PDFMusicBreakout: $(APP_SRC) macapp/Info.plist.in
+$(APP_OUT)/Contents/MacOS/PDFMusicBreakout: $(APP_SRC) macapp/Info.plist.in $(MODULE)
 	@echo "==> building $(APP_NAME) $(VERSION)"
 	@mkdir -p $(APP_OUT)/Contents/MacOS $(APP_OUT)/Contents/Resources
 	@sed 's/@VERSION@/$(VERSION)/g' macapp/Info.plist.in > $(APP_OUT)/Contents/Info.plist
