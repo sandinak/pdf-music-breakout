@@ -321,6 +321,12 @@ def find_title(doc, pages_lines: list[list[HeaderLine]]) -> str:
         for text in {ln.text for ln in lines}:
             if not (2 <= len(text) <= 70) or text.isdigit():
                 continue
+            # An arranger credit or a copyright line sits on every page,
+            # while the title is printed only where a part begins -- so on
+            # a straight count of appearances the credit wins. It is never
+            # the title, so it does not get a vote.
+            if BOILERPLATE_RE.match(text) or EXPRESSION_RE.match(text):
+                continue
             # The part name is not the title, however often it appears.
             if not is_instrument_name(text):
                 seen.add(text)
@@ -701,6 +707,12 @@ def default_title(doc, source: Path) -> str:
     return re.sub(r"(?i)[-_ ]+(all|full|complete|combined|book)$", "", stem).strip()
 
 
+# Windows refuses these outright, whatever the extension: "CON.pdf" is as
+# reserved as "CON". Rare in music, but "Aux Perc" abbreviated to "AUX" is
+# not unthinkable, and the failure would be a baffling one.
+WINDOWS_RESERVED = re.compile(r"(?i)^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)")
+
+
 def safe_filename(name: str) -> str:
     """Keep a formatted filename to a single, writable path component.
 
@@ -710,6 +722,8 @@ def safe_filename(name: str) -> str:
     name = name.replace("/", "-").replace("\\", "-")
     name = re.sub(r'[<>:"|?*\x00-\x1f]', "", name)
     name = re.sub(r"\s*-\s*-\s*", " - ", name).strip(" .")
+    if WINDOWS_RESERVED.match(name):
+        name = f"_{name}"
     return Path(name).name or "part.pdf"
 
 
@@ -810,7 +824,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    if argv is None:
+        argv = sys.argv[1:]
+    # A double-clicked executable arrives with no arguments at all, and a
+    # usage error printed into a console window that closes half a second
+    # later helps nobody. No arguments means the review UI.
+    args = build_parser().parse_args(argv or ["--serve"])
 
     if args.serve:
         import breakout_web

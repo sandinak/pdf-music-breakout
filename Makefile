@@ -145,6 +145,19 @@ app-install: app ## Install the app into /Applications
 	@cp -R $(APP_OUT) "$(APP_DEST)/$(APP_NAME).app"
 	@echo "installed: $(APP_DEST)/$(APP_NAME).app"
 
+# Compare the two implementations on a generated book. This is the check
+# that caught PDFKit returning "Score 1" -- a part name and a page number
+# sharing a baseline -- where PyMuPDF returns two separate lines.
+app-check: $(STAMP) app-verify ## Check the app and the CLI split a sample the same way
+	@mkdir -p build
+	@$(BIN)/python tools/sample_book.py build/sample-ALL.pdf >/dev/null
+	@$(BIN)/python $(MODULE) build/sample-ALL.pdf --list \
+		| grep -E '^  .*\.pdf' | tr -s ' ' > build/split-python.txt
+	@./build/verify build/sample-ALL.pdf \
+		| grep -E '^  .*\.pdf' | tr -s ' ' > build/split-swift.txt
+	@diff -u build/split-python.txt build/split-swift.txt \
+		&& echo "the app and the CLI agree on `wc -l < build/split-python.txt | tr -d ' '` parts"
+
 app-verify: ## Check the app's detection matches the Python implementation
 	@mkdir -p build
 	@swiftc -O macapp/Sources/Naming.swift macapp/Sources/Detection.swift \
@@ -233,6 +246,6 @@ help: ## Show this help
 	@echo "  variables: PDF= OUT= PORT=$(PORT) APP_DEST=$(APP_DEST)"
 
 .PHONY: dev test test-v lint serve split install uninstall \
-        app app-run app-install app-verify app-dist app-notarize \
+        app app-run app-install app-verify app-check app-dist app-notarize \
         brew-tap brew-install brew-reinstall brew-test brew-uninstall \
         formula-sha dist release clean distclean help

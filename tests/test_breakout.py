@@ -8,6 +8,8 @@ real files.
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import pymupdf
 import pytest
@@ -57,6 +59,30 @@ def test_clean_strips_private_use_glyphs():
     """
     assert pmb._clean("Trumpet in B\uf062 1") == "Trumpet in B 1"
     assert pmb.normalise_name("Trumpet in B\uf062 1", pmb.DEFAULT_ALIASES) == "Trumpet1"
+
+
+def test_windows_reserved_device_names_are_escaped():
+    """Windows cannot write CON.pdf, however sensible the part name looked."""
+    assert pmb.safe_filename("CON.pdf") == "_CON.pdf"
+    assert pmb.safe_filename("aux.pdf") == "_aux.pdf"
+    assert pmb.safe_filename("COM1.pdf") == "_COM1.pdf"
+    # Only the whole name is reserved, not anything starting with it.
+    assert pmb.safe_filename("Concerto-Piano.pdf") == "Concerto-Piano.pdf"
+    assert pmb.safe_filename("Auxiliary_Perc.pdf") == "Auxiliary_Perc.pdf"
+
+
+def test_no_arguments_opens_the_review_ui(monkeypatch):
+    """A double-clicked .exe arrives with no arguments and must not die."""
+    seen = {}
+
+    def fake_serve(port, open_browser):
+        seen["port"] = port
+        return 0
+
+    monkeypatch.setitem(sys.modules, "breakout_web",
+                        types.SimpleNamespace(serve=fake_serve))
+    assert pmb.main([]) == 0
+    assert seen["port"] == 8756
 
 
 def test_safe_filename_never_escapes_its_directory():
@@ -126,6 +152,24 @@ def test_continuation_pages_join_the_part_above(band_book):
     parts, _, _ = _detect(band_book)
     score = next(p for p in parts if p.name == "Score")
     assert score.pages == [1, 2], "page 3 has no title, so it continues the score"
+
+
+def test_arranger_credit_never_becomes_the_title(make_pdf):
+    """Regression: every output file was named after the arranger.
+
+    The credit is printed on every page while the title appears only where a
+    part begins, so picking the most repeated header line picked the credit --
+    and it became the title in every filename.
+    """
+    specs = []
+    for part, pages in (("Full Score", 3), ("Piano", 3), ("Alto Saxophone", 3)):
+        for n in range(1, pages + 1):
+            specs.append({"part": part, "credit": "Arr. A. Person",
+                          "title": "Real Title" if n == 1 else None,
+                          "page_no": n})
+    parts, _, title = _detect(make_pdf(specs))
+    assert title == "Real Title"
+    assert [p.name for p in parts] == ["Score", "Piano", "Alto_Sax"]
 
 
 def test_running_heads_and_junk_metadata_title(make_pdf):
@@ -293,7 +337,7 @@ def test_manifest_records_the_split(band_book, tmp_path):
     out = tmp_path / "out"
     manifest = tmp_path / "manifest.json"
     pmb.main([str(band_book), "-o", str(out), "--manifest", str(manifest)])
-    data = json.loads(manifest.read_text())
+    data = json.loads(manifest.read_text(encoding="utf-8"))
     assert data["title"] == "Test Song"
     assert {p["part"] for p in data["parts"]} == {"Score", "Piano", "Alto_Sax", "Drums"}
     assert next(p for p in data["parts"] if p["part"] == "Score")["pages"] == [2, 3]
