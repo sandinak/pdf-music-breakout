@@ -45,8 +45,7 @@ pipx install git+https://github.com/sandinak/pdf-music-breakout
 ```bash
 git clone https://github.com/sandinak/pdf-music-breakout
 cd pdf-music-breakout
-python3 -m venv .venv
-./.venv/bin/pip install -e ".[dev]"
+make dev
 ```
 
 Check it landed:
@@ -61,12 +60,16 @@ For the people who will never open a terminal, build a launcher that opens
 the review screen:
 
 ```bash
-./packaging/make-app.sh                 # into ~/Applications
-./packaging/make-app.sh /Applications   # or system-wide
+make app                        # into ~/Applications
+make app APP_DEST=/Applications # or system-wide
 ```
 
-Installed via Homebrew, the same script is at
-`$(brew --prefix)/share/pdf-music-breakout/make-app.sh`.
+Installed via Homebrew there's no checkout to run `make` in, so the same
+builder ships alongside it:
+
+```bash
+$(brew --prefix)/share/pdf-music-breakout/make-app.sh
+```
 
 The app is a thin wrapper around `pdf-music-breakout --serve`, so install the
 command first. It finds the command even though the Finder launches apps with
@@ -199,19 +202,40 @@ want when a licensed arrangement requires the notice to travel with the music.
 
 Full list: `pdf_music_breakout.py --help`
 
-## Tests
+## Development
 
-```bash
-./.venv/bin/pip install -e ".[dev]"
-./.venv/bin/python -m pytest
-```
+`make` on its own lists every target. The ones you'll want:
 
-61 tests. They build synthetic PDFs shaped like real engraver output and
+| | |
+|---|---|
+| `make dev` | create the virtualenv and install in editable mode |
+| `make test` | run the test suite |
+| `make serve` | run the review UI from the working tree |
+| `make split PDF=x.pdf` | split a file without installing (add `OUT=dir` to write) |
+| `make app` | build the macOS launcher |
+| `make install` | put it on PATH with uv or pipx |
+| `make brew-install` | tap this repo and install through Homebrew |
+| `make release VERSION=x.y.z` | bump, tag, push, and repoint the formula |
+| `make clean` | remove build artefacts |
+
+The virtualenv rebuilds itself whenever `pyproject.toml` changes, so `make
+test` is always enough on its own.
+
+### Tests
+
+61 of them. They build synthetic PDFs shaped like real engraver output and
 check detection, naming, page fitting, the CLI, and the review UI (which runs
 a real server on a loopback port and is driven the way the page drives it).
 
 Several tests exist because a real file broke the tool in that exact way;
 those are marked as regressions in their docstrings.
+
+### Cutting a release
+
+`make release VERSION=0.1.2` bumps `__version__`, runs the tests, tags and
+pushes, waits for GitHub to build the tag tarball, then rewrites the
+formula's URL and `sha256` and pushes that too. It refuses to start on a
+dirty tree, and refuses entirely if you don't name a version.
 
 ## Licence
 
