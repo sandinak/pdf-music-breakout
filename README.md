@@ -25,7 +25,27 @@ python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
 ```
 
-## Use
+## The review screen
+
+Detection is right most of the time, but when it's wrong it is wrong
+*quietly* — one real file turned 58 pages into 58 "parts" without
+complaining. So there's a screen to check it on:
+
+```bash
+./.venv/bin/python pdf_music_breakout.py --serve
+```
+
+That opens a page in your browser. Drop a combined PDF on it and you get a
+thumbnail of every page, showing where each part was detected to begin. A
+ticked page starts a part; untick one that isn't really a new part, tick one
+that was missed, and rename anything that came out wrong. The list of files
+updates as you go. Export as a `.zip`, or type a folder path to write
+straight into your show directory.
+
+It runs entirely on your machine — bound to localhost, nothing uploaded
+anywhere, and nothing written to disk until you ask.
+
+## Use from the command line
 
 Look before you leap — this shows what it found without writing anything:
 
@@ -139,10 +159,12 @@ Full list: `pdf_music_breakout.py --help`
 ./.venv/bin/python -m pytest
 ```
 
-The suite builds synthetic PDFs shaped like real engraver output and checks
-detection, naming, page fitting and the CLI. Several tests exist because a
-real file broke the tool in that exact way; those are marked as regressions
-in their docstrings.
+61 tests. They build synthetic PDFs shaped like real engraver output and
+check detection, naming, page fitting, the CLI, and the review UI (which runs
+a real server on a loopback port and is driven the way the page drives it).
+
+Several tests exist because a real file broke the tool in that exact way;
+those are marked as regressions in their docstrings.
 
 ## Licence
 

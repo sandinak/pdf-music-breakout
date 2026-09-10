@@ -20,7 +20,7 @@ dev = ["pytest>=8"]
 pdf-music-breakout = "pdf_music_breakout:main"
 
 [tool.setuptools]
-py-modules = ["pdf_music_breakout"]
+py-modules = ["pdf_music_breakout", "breakout_web"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

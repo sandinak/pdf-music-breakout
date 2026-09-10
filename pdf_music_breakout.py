@@ -515,13 +515,14 @@ def parts_from_bookmarks(doc, aliases: dict[str, str]) -> list[Part]:
     return parts
 
 
-def parts_from_headers(doc, aliases: dict[str, str], band: float,
-                       boiler_threshold: float,
-                       verbose: bool) -> tuple[list[Part], list[int], str]:
-    """Detect parts by reading each page's printed header.
+def detect_page_labels(doc, band: float, boiler_threshold: float,
+                       verbose: bool = False) -> tuple[list[str | None], str]:
+    """Read the part name printed on each page.
 
-    Returns the parts, any leading pages that carry no part name (cover sheet,
-    copyright notice and so on), and the title read off the page.
+    Returns one entry per page -- the label where a part begins, None where
+    the page carries no name of its own -- plus the song title. This is the
+    shared detection pass: the CLI groups the result into files, and the
+    review UI shows it as editable page boundaries.
     """
     pages_lines = [header_lines(page, band) for page in doc]
     title = find_title(doc, pages_lines)
@@ -541,34 +542,46 @@ def parts_from_headers(doc, aliases: dict[str, str], band: float,
             shown = label if label else "-- (continuation or front matter)"
             extra = f"   <- {raw!r}" if raw and raw != label else ""
             print(f"  page {i + 1:>3}:  {shown}{extra}", file=sys.stderr)
+    return labels, title
 
-    # Pages before the first label are front matter.
+
+def group_labels(labels: list[str | None], aliases: dict[str, str],
+                 n_pages: int) -> tuple[list[Part], list[int]]:
+    """Turn per-page labels into parts, plus any leading front matter.
+
+    An unlabelled page continues the part above it. Parts are grouped by
+    normalised name, so one interrupted and resumed later lands in a single
+    file rather than two.
+    """
     first = next((i for i, lab in enumerate(labels) if lab), None)
     if first is None:
-        return [], list(range(len(doc))), title
+        return [], list(range(n_pages))
     front = list(range(first))
 
-    # Unlabelled pages continue the part above them.
-    current = None
-    ordered: list[tuple[str, int]] = []
-    for i in range(first, len(doc)):
-        if labels[i]:
-            current = labels[i]
-        if current:
-            ordered.append((current, i))
-
-    # Group by normalised name so a part interrupted and resumed later still
-    # lands in a single file.
     parts: list[Part] = []
     index: dict[str, Part] = {}
-    for label, page in ordered:
-        name = normalise_name(label, aliases)
+    current = None
+    for i in range(first, n_pages):
+        if labels[i]:
+            current = labels[i]
+        if not current:
+            continue
+        name = normalise_name(current, aliases)
         part = index.get(name)
         if part is None:
-            part = Part(name, label, [])
+            part = Part(name, current, [])
             index[name] = part
             parts.append(part)
-        part.pages.append(page)
+        part.pages.append(i)
+    return parts, front
+
+
+def parts_from_headers(doc, aliases: dict[str, str], band: float,
+                       boiler_threshold: float,
+                       verbose: bool) -> tuple[list[Part], list[int], str]:
+    """Detect parts by reading each page's printed header."""
+    labels, title = detect_page_labels(doc, band, boiler_threshold, verbose)
+    parts, front = group_labels(labels, aliases, len(doc))
     return parts, front, title
 
 
@@ -719,7 +732,15 @@ def build_parser() -> argparse.ArgumentParser:
   pdf_music_breakout.py book.pdf -o out --map "2-7=Full Score" --map "8-14=Piano/Vocal"
 """,
     )
-    p.add_argument("source", type=Path, help="the combined PDF to split")
+    p.add_argument("source", type=Path, nargs="?",
+                   help="the combined PDF to split (omit when using --serve)")
+    p.add_argument("--serve", action="store_true",
+                   help="open the review UI in a browser instead: drop a PDF, check the "
+                        "detected parts, correct any it got wrong, then export")
+    p.add_argument("--port", type=int, default=8756,
+                   help="port for --serve (default: %(default)s)")
+    p.add_argument("--no-browser", action="store_true",
+                   help="with --serve, don't open a browser automatically")
     p.add_argument("-o", "--out-dir", type=Path,
                    help="directory for the part PDFs (default: alongside the source)")
 
@@ -783,6 +804,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
+    if args.serve:
+        import breakout_web
+        return breakout_web.serve(port=args.port, open_browser=not args.no_browser)
+
+    if args.source is None:
+        raise SystemExit("give a PDF to split, or use --serve for the review UI")
     if not args.source.is_file():
         raise SystemExit(f"no such file: {args.source}")
 
