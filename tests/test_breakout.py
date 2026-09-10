@@ -75,14 +75,16 @@ def test_no_arguments_opens_the_review_ui(monkeypatch):
     """A double-clicked .exe arrives with no arguments and must not die."""
     seen = {}
 
-    def fake_serve(port, open_browser):
+    def fake_serve(port, open_browser, source=None):
         seen["port"] = port
+        seen["source"] = source
         return 0
 
     monkeypatch.setitem(sys.modules, "breakout_web",
                         types.SimpleNamespace(serve=fake_serve))
     assert pmb.main([]) == 0
     assert seen["port"] == 8756
+    assert seen["source"] is None
 
 
 def test_safe_filename_never_escapes_its_directory():

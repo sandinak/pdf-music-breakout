@@ -126,12 +126,24 @@ complaining. So there's a screen to check it on:
 Running the command with no arguments at all does the same thing, which is
 what a double-clicked `.exe` on Windows does.
 
-That opens a page in your browser. Drop a combined PDF on it and you get a
-thumbnail of every page, showing where each part was detected to begin. A
-ticked page starts a part; untick one that isn't really a new part, tick one
-that was missed, and rename anything that came out wrong. The list of files
-updates as you go. Export as a `.zip`, or type a folder path to write
-straight into your show directory.
+Or open a book straight into it:
+
+```bash
+pdf-music-breakout Abracadabra-ALL.pdf --serve
+```
+
+You get the same tree the Mac app shows: one row per part, named, with the
+file it will write and the pages it covers, and the rest of that part's pages
+folded inside it. Beside it sits the selected page, big enough to read —
+arrow keys to page through, `+`/`−`/`0` to zoom, or fit the width or the
+page.
+
+Fixing what detection got wrong is the same gesture too: drag a page's
+picture onto the part it really belongs to, drag a part onto another to merge
+them, or drop either onto *Front matter* to leave it out. A page that should
+have started a part of its own has a tick for that, and every part can be
+renamed in place. The list of files updates as you go. Export as a `.zip`, or
+type a folder path to write straight into your show directory.
 
 It runs entirely on your machine — bound to localhost, nothing uploaded
 anywhere, and nothing written to disk until you ask.
