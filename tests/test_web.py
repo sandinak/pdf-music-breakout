@@ -8,11 +8,18 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import queue
+import re
+import subprocess
+import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -47,6 +54,45 @@ def loaded(server, band_book):
 
 
 # --------------------------------------------------------------------------
+
+
+def test_the_server_says_where_it_is_without_being_flushed_at():
+    """A wrapper starts the server and waits to be told where it is.
+
+    Regression: print() into a pipe is block-buffered, so the line the
+    desktop shell waits for sat in a buffer, and starting the app looked
+    exactly like a hang.
+
+    Read on a thread: a blocking readline would make a failure here hang the
+    suite instead of failing it, which is how a broken test hides.
+    """
+    root = Path(__file__).resolve().parent.parent
+    env = {**os.environ}
+    env.pop("PYTHONUNBUFFERED", None)   # the very thing being tested
+    proc = subprocess.Popen(
+        [sys.executable, str(root / "pdf_music_breakout.py"),
+         "--serve", "--no-browser", "--port", "0"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd=root, env=env)
+
+    lines: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in proc.stdout],
+                     daemon=True).start()
+    try:
+        seen = []
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                line = lines.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            seen.append(line)
+            if re.search(r"http://127\.0\.0\.1:\d+/", line):
+                return
+        raise AssertionError("no address in 20s; saw: " + "".join(seen))
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
 
 def test_a_file_can_be_opened_into_the_ui(band_book):
