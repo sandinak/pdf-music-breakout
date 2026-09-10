@@ -40,11 +40,17 @@ uv tool install git+https://github.com/sandinak/pdf-music-breakout
 pipx install git+https://github.com/sandinak/pdf-music-breakout
 ```
 
-**Windows** — download `pdf-music-breakout.exe` from
-[Releases](https://github.com/sandinak/pdf-music-breakout/releases/latest).
-It is a single file with Python and everything else already inside it, so
-there is nothing to install first. Run it from a command prompt like any
-other command, or double-click it to open the review screen in your browser.
+**Windows** — two downloads on
+[Releases](https://github.com/sandinak/pdf-music-breakout/releases/latest),
+depending on what you want:
+
+- `PDF Music Breakout Setup.exe` — the app, in its own window. Install it,
+  then open a combined PDF with it.
+- `pdf-music-breakout.exe` — the command on its own, a single file with
+  Python and everything else already inside. Run it from a command prompt,
+  or double-click it to open the review screen in your browser.
+
+Neither needs Python installed.
 
 **From a checkout**, for hacking on it:
 
@@ -112,6 +118,29 @@ of the licence constraints described below.
 Its detection is a port of the Python one, and `make app-verify` builds a
 harness that checks the two agree; they currently produce identical results
 on every real file tested.
+
+## The Windows app
+
+The same review screen as the Mac app's — the tree of parts, drag and drop,
+the readable page — in a window rather than a browser tab. Open a PDF from
+the File menu or drop one on the window; ⌃O, ⌃S to export, arrow keys to page
+through, ⌃+/⌃−/⌃0 to zoom.
+
+Inside, it is a window around the splitter you already have: the same Python
+that the command line and the browser UI use, started on a loopback port with
+the window pointed at it. Nothing about detecting or splitting is
+reimplemented in JavaScript, which is the point — the heuristics exist twice
+already (Python, and the Swift port the Mac app uses, checked against each
+other by `make app-check`), and a third copy is how they start giving
+different answers for the same PDF.
+
+To run it from a checkout:
+
+```bash
+make desktop                 # against the working tree
+make desktop PDF=book.pdf    # with a book already open
+make desktop-dist            # package it for this platform
+```
 
 ## The review screen
 
@@ -272,6 +301,8 @@ Full list: `pdf_music_breakout.py --help`
 | `make app-verify` | build the harness that compares the app with the CLI |
 | `make app-check` | split a generated book with both, and diff the results |
 | `make exe` | build a standalone executable (no Python needed to run it) |
+| `make desktop` | run the desktop shell from the working tree (`PDF=` to open one) |
+| `make desktop-dist` | package the desktop app for this platform |
 | `make sample` | write a synthetic combined book to try things on |
 | `make install` | put it on PATH with uv or pipx |
 | `make brew-install` | tap this repo and install through Homebrew |
@@ -282,8 +313,8 @@ The virtualenv rebuilds itself whenever `pyproject.toml` changes, so `make
 test` is always enough on its own.
 
 Every push runs the suite on Linux, macOS and Windows against Python 3.10 and
-3.13, builds the Windows executable and splits a book with it, and checks the
-Mac app and the CLI still agree — that last one is not ceremony, it caught the
+3.13, builds the Windows executable and splits a book with it, packages the
+Windows app, and checks the Mac app and the CLI still agree — that last one is not ceremony, it caught the
 app reading a page number as part of an instrument's name.
 
 ### Tests

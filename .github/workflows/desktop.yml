@@ -1,0 +1,56 @@
+name: desktop
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # The window is a shell around the same server the CLI and the browser
+      # UI already use, so the splitter goes inside it as a built executable
+      # rather than being reimplemented in JavaScript.
+      - name: Build the sidecar
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+          python -m PyInstaller --noconfirm --clean --onefile `
+            --name pdf-music-breakout `
+            --hidden-import breakout_web `
+            --distpath dist --workpath build/pyinstaller --specpath build `
+            pdf_music_breakout.py
+          New-Item -ItemType Directory -Force -Path desktop/sidecar | Out-Null
+          Copy-Item dist/pdf-music-breakout.exe desktop/sidecar/
+
+      - name: Build the installer
+        working-directory: desktop
+        run: |
+          npm ci
+          npx electron-builder --win -p never
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pdf-music-breakout-windows-desktop
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip

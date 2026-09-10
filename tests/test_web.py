@@ -72,6 +72,21 @@ def test_a_file_can_be_opened_into_the_ui(band_book):
         httpd.server_close()
 
 
+def test_a_file_can_be_opened_by_path(server, band_book):
+    """What the desktop shell does: it has the file, so it sends the path."""
+    data = json.load(_post(server, "/api/open", {"path": str(band_book)}))
+    assert data["title"] == "Test Song"
+    opened = json.load(urllib.request.urlopen(server + "/api/opened"))
+    assert opened["sid"] == data["sid"], "the page picks it up on the next load"
+    breakout_web.Handler.opened = None
+
+
+def test_opening_a_missing_file_says_so(server):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(server, "/api/open", {"path": "/no/such/book.pdf"})
+    assert "no such file" in json.load(exc.value)["error"]
+
+
 def test_page_is_served(server):
     html = urllib.request.urlopen(server + "/").read().decode()
     assert "<title>PDF Music Breakout</title>" in html

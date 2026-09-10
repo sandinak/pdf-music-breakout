@@ -108,6 +108,26 @@ exe: $(STAMP) ## Build a standalone executable (runs without Python installed)
 		$(MODULE)
 	@echo "built: dist/pdf-music-breakout"
 
+# ELECTRON_RUN_AS_NODE turns Electron into a plain Node interpreter, and some
+# tooling sets it. Inherited into these targets it looks like a hang.
+ELECTRON := env -u ELECTRON_RUN_AS_NODE npx
+
+desktop: $(STAMP) ## Run the desktop shell against the working tree
+	@cd desktop && npm install --silent --no-audit --no-fund
+	@cd desktop && $(ELECTRON) electron . $(if $(PDF),"$(PDF)",)
+
+desktop-shot: $(STAMP) ## Screenshot the desktop shell without showing a window
+	@cd desktop && npm install --silent --no-audit --no-fund
+	@cd desktop && $(ELECTRON) electron . $(if $(PDF),"$(PDF)",) \
+		--screenshot=../build/desktop.png
+
+desktop-dist: exe ## Package the desktop app for this platform
+	@rm -rf desktop/sidecar && mkdir -p desktop/sidecar
+	@cp dist/pdf-music-breakout desktop/sidecar/
+	@cd desktop && npm install --silent --no-audit --no-fund
+	@cd desktop && $(ELECTRON) electron-builder -p never
+	@echo "built: desktop/dist"
+
 sample: $(STAMP) ## Write a synthetic combined book to try things on
 	@$(BIN)/python tools/sample_book.py $(if $(OUT),$(OUT),sample-ALL.pdf)
 
@@ -261,6 +281,7 @@ help: ## Show this help
 	@echo "  variables: PDF= OUT= PORT=$(PORT) APP_DEST=$(APP_DEST)"
 
 .PHONY: dev test test-v lint serve split install uninstall exe sample \
+        desktop desktop-shot desktop-dist \
         app app-run app-install app-verify app-check app-dist app-notarize \
         brew-tap brew-install brew-reinstall brew-test brew-uninstall \
         formula-sha dist release clean distclean help
