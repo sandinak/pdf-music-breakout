@@ -44,6 +44,7 @@ GH       ?= gh
 # Whether VERSION was supplied on the command line, so `release` can insist.
 VERSION_GIVEN := $(filter command line,$(origin VERSION))
 TARBALL  = $(REPO)/archive/refs/tags/v$(VERSION).tar.gz
+RELEASE_URL = $(REPO)/releases/tag/v$(VERSION)
 
 .DEFAULT_GOAL := help
 
@@ -239,6 +240,11 @@ release: ## Cut a release (make release VERSION=0.1.2)
 	@git add -A && git commit -q -m "Release v$(VERSION)" || true
 	@git tag -a "v$(VERSION)" -m "v$(VERSION)"
 	@git push -q origin main --tags
+# Before the Windows builds finish and start attaching their own files:
+# whoever gets there first creates the release, and only this side knows
+# what to call it.
+	@$(GH) release create "v$(VERSION)" --title "v$(VERSION)" --generate-notes \
+		|| echo "    (release v$(VERSION) already exists)"
 	@echo "==> waiting for the tag tarball, then updating the formula"
 	@sha=""; for i in 1 2 3 4 5 6 7 8 9 10; do \
 		sha=`curl -fsSL "$(TARBALL)" 2>/dev/null | shasum -a 256 | cut -d' ' -f1`; \
@@ -257,10 +263,9 @@ release: ## Cut a release (make release VERSION=0.1.2)
 		$(MAKE) --no-print-directory app-dist; \
 		echo "    (no notarytool profile '$(NOTARY_PROFILE)' -- signed, not notarised)"; \
 	fi
-	@$(GH) release create "v$(VERSION)" $(APP_ZIP) \
-		--title "v$(VERSION)" --generate-notes \
-		|| $(GH) release upload "v$(VERSION)" $(APP_ZIP) --clobber
-	@echo "==> released v$(VERSION)"
+	@$(GH) release upload "v$(VERSION)" $(APP_ZIP) --clobber
+	@echo "==> released v$(VERSION): $(RELEASE_URL)"
+	@echo "    the Windows executable and installer follow, from CI"
 
 # --------------------------------------------------------------------- tidying
 
