@@ -333,9 +333,10 @@ pushes, waits for GitHub to build the tag tarball, then rewrites the
 formula's URL and `sha256` and pushes that too. It refuses to start on a
 dirty tree, and refuses entirely if you don't name a version.
 
-It then builds the Mac app as a universal binary, signs it with the Developer
-ID certificate in your keychain, and attaches the `.zip` to the GitHub
-release. If it can find notarisation credentials it notarises and staples the
+It bumps the desktop shell's version to match, then builds the Mac app as a
+universal binary, signs it with the Developer ID certificate in your
+keychain, and attaches the `.zip` to the GitHub release. CI adds the Windows
+executable and installer to the same release when the tag lands. If it can find notarisation credentials it notarises and staples the
 app first, so the download opens without a Gatekeeper warning — otherwise it
 still attaches the signed build and says so.
 
