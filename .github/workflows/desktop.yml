@@ -50,14 +50,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: pdf-music-breakout-windows-desktop
-          path: |
-            desktop/dist/*.exe
-            desktop/dist/*.zip
+          path: desktop/dist/*.exe
 
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          files: |
-            desktop/dist/*.exe
-            desktop/dist/*.zip
+          files: desktop/dist/*.exe

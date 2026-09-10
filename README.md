@@ -54,11 +54,12 @@ pipx install git+https://github.com/sandinak/pdf-music-breakout
 [Releases](https://github.com/sandinak/pdf-music-breakout/releases/latest),
 depending on what you want:
 
-- `PDF Music Breakout Setup.exe` — the app, in its own window. Install it,
-  then open a combined PDF with it.
+- `PDF.Music.Breakout.Setup.<version>.exe` — the app, in its own window.
+  Install it, then open a combined PDF with it.
 - `pdf-music-breakout.exe` — the command on its own, a single file with
   Python and everything else already inside. Run it from a command prompt,
-  or double-click it to open the review screen in your browser.
+  or double-click it to open the review screen in your browser. Much the
+  smaller of the two, if you only want the splitting.
 
 Neither needs Python installed.
 
