@@ -1,6 +1,6 @@
 {
   "name": "pdf-music-breakout-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Desktop shell for the pdf-music-breakout review UI",
   "license": "AGPL-3.0-or-later",
