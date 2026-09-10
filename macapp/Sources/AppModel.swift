@@ -178,6 +178,42 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - Documents
+
+    /// Ask for a combined PDF and load it.
+    func chooseAndOpen() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose the combined PDF to split"
+        if panel.runModal() == .OK, let url = panel.url { open(url: url) }
+    }
+
+    /// Ask where the parts should go, then write them.
+    func chooseAndExport() {
+        guard !parts.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Export Here"
+        panel.message = "Choose a folder for the part PDFs"
+        if panel.runModal() == .OK, let url = panel.url { export(to: url) }
+    }
+
+    /// Put the window back to the drop target, ready for another file.
+    func close() {
+        document = nil
+        sourceName = ""
+        pages = []
+        parts = []
+        files = []
+        front = []
+        notice = nil
+        noticeIsError = false
+        options = ExportOptions()
+    }
+
     // MARK: - Export
 
     func export(to folder: URL) {

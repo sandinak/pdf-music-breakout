@@ -5,13 +5,14 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject private var model = AppModel.shared
     @State private var dropTargeted = false
+    @State private var preview: PreviewTarget?
 
     var body: some View {
         Group {
             if model.isLoaded {
                 loaded
             } else {
-                DropWell(targeted: $dropTargeted, onPick: openPanel)
+                DropWell(targeted: $dropTargeted) { model.chooseAndOpen() }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -22,6 +23,9 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .toolbar { toolbarItems }
         .navigationTitle(model.isLoaded ? model.sourceName : "PDF Music Breakout")
+        .sheet(item: $preview) { _ in
+            PagePreview(model: model, target: $preview)
+        }
     }
 
     // MARK: - Toolbar
@@ -29,8 +33,17 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Button { openPanel() } label: { Label("Open", systemImage: "doc.badge.plus") }
-                .help("Choose a combined PDF")
+            Button { model.chooseAndOpen() } label: {
+                Label("Open", systemImage: "doc.badge.plus")
+            }
+            .help("Open a different combined PDF (⌘O)")
+        }
+        ToolbarItem {
+            Button { model.close() } label: {
+                Label("Close", systemImage: "xmark.circle")
+            }
+            .disabled(!model.isLoaded)
+            .help("Close this PDF and start again (⌘W)")
         }
         ToolbarItem {
             Button { model.resetToDetected() } label: {
@@ -40,10 +53,12 @@ struct ContentView: View {
             .help("Put every boundary back where detection found it")
         }
         ToolbarItem {
-            Button { exportPanel() } label: { Label("Export…", systemImage: "square.and.arrow.down") }
-                .disabled(model.files.isEmpty || model.busy)
-                .keyboardShortcut("e")
-                .help("Write one PDF per part into a folder")
+            Button { model.chooseAndExport() } label: {
+                Label("Export…", systemImage: "square.and.arrow.down")
+            }
+            .disabled(model.files.isEmpty || model.busy)
+            .keyboardShortcut("e")
+            .help("Write one PDF per part into a folder (⌘E)")
         }
     }
 
@@ -51,22 +66,24 @@ struct ContentView: View {
 
     private var loaded: some View {
         HSplitView {
-            pageList.frame(minWidth: 420)
+            pageList.frame(minWidth: 440)
             sidebar.frame(minWidth: 300, maxWidth: 420)
         }
     }
 
     private var pageList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("A ticked page starts a new part. Untick one that isn't really "
-                 + "a new part, or tick one that was missed.")
+            Text("A ticked page starts a new part. Double-click a page to see it "
+                 + "full size if the thumbnail is too small to tell.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(12)
             Divider()
             List(model.pages) { page in
-                PageRowView(page: page, model: model)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10))
+                PageRowView(page: page, model: model) {
+                    preview = PreviewTarget(id: page.id)
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10))
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
         }
@@ -174,26 +191,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Files
-
-    private func openPanel() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose the combined PDF to split"
-        if panel.runModal() == .OK, let url = panel.url { model.open(url: url) }
-    }
-
-    private func exportPanel() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Export Here"
-        panel.message = "Choose a folder for the part PDFs"
-        if panel.runModal() == .OK, let url = panel.url { model.export(to: url) }
-    }
-
     private func load(from providers: [NSItemProvider]) -> Bool {
         guard let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -234,6 +231,8 @@ private struct DropWell: View {
 private struct PageRowView: View {
     let page: PageRow
     @ObservedObject var model: AppModel
+    let onPreview: () -> Void
+
     @State private var draft: String = ""
     @FocusState private var focused: Bool
 
@@ -243,9 +242,16 @@ private struct PageRowView: View {
         HStack(alignment: .top, spacing: 12) {
             thumbnail
             VStack(alignment: .leading, spacing: 5) {
-                Text("Page \(page.number) — \(Int(page.size.width))×\(Int(page.size.height)) pt"
-                     + (page.isLandscape ? " · landscape" : ""))
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text("Page \(page.number) — \(Int(page.size.width))×\(Int(page.size.height)) pt"
+                         + (page.isLandscape ? " · landscape" : ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button(action: onPreview) {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("See this page full size")
+                }
 
                 HStack(spacing: 8) {
                     Toggle("starts a part", isOn: Binding(
@@ -269,6 +275,11 @@ private struct PageRowView: View {
                 }
             }
             Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: onPreview)
+        .contextMenu {
+            Button("Open Page \(page.number)…", action: onPreview)
         }
         .onAppear { draft = page.label ?? "" }
         .onChange(of: page.label) { _, new in
@@ -294,5 +305,6 @@ private struct PageRowView: View {
         }
         .frame(width: 74, height: 96)
         .overlay(Rectangle().strokeBorder(.separator))
+        .help("Double-click to see this page full size")
     }
 }

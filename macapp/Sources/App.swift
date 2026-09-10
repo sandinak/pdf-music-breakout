@@ -9,15 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { return }
         Task { @MainActor in AppModel.shared.open(url: url) }
     }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
-    }
 }
 
 @main
 struct PDFMusicBreakoutApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @ObservedObject private var model = AppModel.shared
 
     var body: some Scene {
         WindowGroup {
@@ -25,7 +22,21 @@ struct PDFMusicBreakoutApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
-            CommandGroup(replacing: .newItem) { }
+            // The standard File menu: open another book, or put this one
+            // away and start again, without hunting for the toolbar.
+            CommandGroup(replacing: .newItem) {
+                Button("Open…") { model.chooseAndOpen() }
+                    .keyboardShortcut("o")
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("Export Parts…") { model.chooseAndExport() }
+                    .keyboardShortcut("e")
+                    .disabled(model.files.isEmpty)
+                Divider()
+                Button("Close Document") { model.close() }
+                    .keyboardShortcut("w")
+                    .disabled(!model.isLoaded)
+            }
         }
     }
 }
