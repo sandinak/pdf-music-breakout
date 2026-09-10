@@ -3,8 +3,8 @@ class PdfMusicBreakout < Formula
 
   desc "Split a combined music PDF into one printable PDF per instrument part"
   homepage "https://github.com/sandinak/pdf-music-breakout"
-  url "https://github.com/sandinak/pdf-music-breakout/archive/refs/tags/v0.2.1.tar.gz"
-  sha256 "44184bd5051f60b19f561f13b8ae118b55afcd4927815d92dca3bad919e4b66a"
+  url "https://github.com/sandinak/pdf-music-breakout/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "c7f7349890b12ac2f66fd7fab88778a7c5e00c0a3f0e3aed97b65bbe87606303"
   license "AGPL-3.0-or-later"
 
   depends_on "python@3.14"
