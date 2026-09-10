@@ -97,6 +97,20 @@ uninstall: ## Remove the uv/pipx installation
 	@if command -v uv >/dev/null 2>&1; then uv tool uninstall pdf-music-breakout || true; fi
 	@if command -v pipx >/dev/null 2>&1; then pipx uninstall pdf-music-breakout || true; fi
 
+# ------------------------------------------------------------- windows / exe
+
+exe: $(STAMP) ## Build a standalone executable (runs without Python installed)
+	@$(BIN)/pip install -q pyinstaller
+	@$(BIN)/pyinstaller --noconfirm --clean --onefile \
+		--name pdf-music-breakout \
+		--hidden-import breakout_web \
+		--distpath dist --workpath build/pyinstaller --specpath build \
+		$(MODULE)
+	@echo "built: dist/pdf-music-breakout"
+
+sample: $(STAMP) ## Write a synthetic combined book to try things on
+	@$(BIN)/python tools/sample_book.py $(if $(OUT),$(OUT),sample-ALL.pdf)
+
 # ------------------------------------------------------------------ mac app
 
 $(APP_OUT)/Contents/MacOS/PDFMusicBreakout: $(APP_SRC) macapp/Info.plist.in $(MODULE)
@@ -223,7 +237,8 @@ release: ## Cut a release (make release VERSION=0.1.2)
 		echo "    (no notarytool profile '$(NOTARY_PROFILE)' -- signed, not notarised)"; \
 	fi
 	@$(GH) release create "v$(VERSION)" $(APP_ZIP) \
-		--title "v$(VERSION)" --generate-notes
+		--title "v$(VERSION)" --generate-notes \
+		|| $(GH) release upload "v$(VERSION)" $(APP_ZIP) --clobber
 	@echo "==> released v$(VERSION)"
 
 # --------------------------------------------------------------------- tidying
@@ -245,7 +260,7 @@ help: ## Show this help
 	@echo
 	@echo "  variables: PDF= OUT= PORT=$(PORT) APP_DEST=$(APP_DEST)"
 
-.PHONY: dev test test-v lint serve split install uninstall \
+.PHONY: dev test test-v lint serve split install uninstall exe sample \
         app app-run app-install app-verify app-check app-dist app-notarize \
         brew-tap brew-install brew-reinstall brew-test brew-uninstall \
         formula-sha dist release clean distclean help

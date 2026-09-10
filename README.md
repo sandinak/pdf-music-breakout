@@ -40,6 +40,12 @@ uv tool install git+https://github.com/sandinak/pdf-music-breakout
 pipx install git+https://github.com/sandinak/pdf-music-breakout
 ```
 
+**Windows** — download `pdf-music-breakout.exe` from
+[Releases](https://github.com/sandinak/pdf-music-breakout/releases/latest).
+It is a single file with Python and everything else already inside it, so
+there is nothing to install first. Run it from a command prompt like any
+other command, or double-click it to open the review screen in your browser.
+
 **From a checkout**, for hacking on it:
 
 ```bash
@@ -116,6 +122,9 @@ complaining. So there's a screen to check it on:
 ```bash
 ./.venv/bin/python pdf_music_breakout.py --serve
 ```
+
+Running the command with no arguments at all does the same thing, which is
+what a double-clicked `.exe` on Windows does.
 
 That opens a page in your browser. Drop a combined PDF on it and you get a
 thumbnail of every page, showing where each part was detected to begin. A
@@ -248,7 +257,10 @@ Full list: `pdf_music_breakout.py --help`
 | `make app-install` | build it and install into /Applications |
 | `make app-dist` | build it signed with your Developer ID, and zip it |
 | `make app-notarize` | that, then send it to Apple to be notarised |
-| `make app-verify` | check the app's detection matches the Python one |
+| `make app-verify` | build the harness that compares the app with the CLI |
+| `make app-check` | split a generated book with both, and diff the results |
+| `make exe` | build a standalone executable (no Python needed to run it) |
+| `make sample` | write a synthetic combined book to try things on |
 | `make install` | put it on PATH with uv or pipx |
 | `make brew-install` | tap this repo and install through Homebrew |
 | `make release VERSION=x.y.z` | bump, tag, push, and repoint the formula |
@@ -257,9 +269,14 @@ Full list: `pdf_music_breakout.py --help`
 The virtualenv rebuilds itself whenever `pyproject.toml` changes, so `make
 test` is always enough on its own.
 
+Every push runs the suite on Linux, macOS and Windows against Python 3.10 and
+3.13, builds the Windows executable and splits a book with it, and checks the
+Mac app and the CLI still agree — that last one is not ceremony, it caught the
+app reading a page number as part of an instrument's name.
+
 ### Tests
 
-61 of them. They build synthetic PDFs shaped like real engraver output and
+64 of them. They build synthetic PDFs shaped like real engraver output and
 check detection, naming, page fitting, the CLI, and the review UI (which runs
 a real server on a loopback port and is driven the way the page drives it).
 

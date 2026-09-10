@@ -1,0 +1,52 @@
+name: windows
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  exe:
+    name: standalone executable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+
+      # --serve imports breakout_web lazily, so PyInstaller cannot see it.
+      - name: Build
+        run: >
+          python -m PyInstaller --noconfirm --clean --onefile
+          --name pdf-music-breakout
+          --hidden-import breakout_web
+          --distpath dist --workpath build/pyinstaller --specpath build
+          pdf_music_breakout.py
+
+      # Not "does it start" but "does it split", on the platform in question.
+      - name: Split a book with it
+        shell: bash
+        run: |
+          python tools/sample_book.py sample-ALL.pdf
+          dist/pdf-music-breakout.exe --version
+          dist/pdf-music-breakout.exe sample-ALL.pdf --list
+          dist/pdf-music-breakout.exe sample-ALL.pdf -o parts
+          ls parts
+          test "$(ls parts | wc -l)" -eq 12
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pdf-music-breakout-windows
+          path: dist/pdf-music-breakout.exe
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/pdf-music-breakout.exe
