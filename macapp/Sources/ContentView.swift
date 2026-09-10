@@ -4,11 +4,14 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject private var model = AppModel.shared
+    @Environment(\.openWindow) private var openWindow
     @State private var dropTargeted = false
-    @State private var preview: PreviewTarget?
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            // In the layout rather than over it: a notice that covered the
+            // instructions underneath was how this window used to look.
+            noticeBar
             if model.isLoaded {
                 loaded
             } else {
@@ -16,16 +19,18 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .overlay(alignment: .top) { noticeBar }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             load(from: providers)
         }
         .frame(minWidth: 900, minHeight: 600)
         .toolbar { toolbarItems }
         .navigationTitle(model.isLoaded ? model.sourceName : "PDF Music Breakout")
-        .sheet(item: $preview) { _ in
-            PagePreview(model: model, target: $preview)
-        }
+    }
+
+    /// Put a page in the partner window, opening it if it is not up yet.
+    private func preview(page index: Int) {
+        model.select(index)
+        openWindow(id: pagePreviewWindowID)
     }
 
     // MARK: - Toolbar
@@ -43,7 +48,14 @@ struct ContentView: View {
                 Label("Close", systemImage: "xmark.circle")
             }
             .disabled(!model.isLoaded)
-            .help("Close this PDF and start again (⌘W)")
+            .help("Close this PDF and start again (⇧⌘W)")
+        }
+        ToolbarItem {
+            Button { preview(page: model.previewPage ?? 0) } label: {
+                Label("Preview", systemImage: "doc.text.magnifyingglass")
+            }
+            .disabled(!model.isLoaded)
+            .help("Show the selected page in the preview window (⌥⌘P)")
         }
         ToolbarItem {
             Button { model.resetToDetected() } label: {
@@ -57,8 +69,7 @@ struct ContentView: View {
                 Label("Export…", systemImage: "square.and.arrow.down")
             }
             .disabled(model.files.isEmpty || model.busy)
-            .keyboardShortcut("e")
-            .help("Write one PDF per part into a folder (⌘E)")
+            .help("Write one PDF per part into a folder (⌘S)")
         }
     }
 
@@ -73,19 +84,47 @@ struct ContentView: View {
 
     private var pageList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("A ticked page starts a new part. Double-click a page to see it "
-                 + "full size if the thumbnail is too small to tell.")
+            listHeader
+            Divider()
+            // The preview window can page through the document itself, so
+            // keep the tree scrolled to whatever it has landed on.
+            ScrollViewReader { list in
+                List(model.rows, selection: $model.selection) { row in
+                    treeRow(row)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10))
+                }
+                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .onChange(of: model.selection) { _, new in
+                    guard let new else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { list.scrollTo(new) }
+                }
+            }
+        }
+    }
+
+    private var listHeader: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("Each part is a row, with its remaining pages inside it. Drag a "
+                 + "page's picture onto another part to move it there.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .padding(12)
-            Divider()
-            List(model.pages) { page in
-                PageRowView(page: page, model: model) {
-                    preview = PreviewTarget(id: page.id)
-                }
-                .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10))
-            }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
+            Spacer(minLength: 0)
+            Button("Expand All") { withAnimation { model.expandAll() } }
+                .disabled(model.groups.allSatisfy { model.expanded.contains($0.id) })
+            Button("Collapse All") { withAnimation { model.collapseAll() } }
+                .disabled(model.expanded.isEmpty)
+        }
+        .controlSize(.small)
+        .padding(12)
+    }
+
+    @ViewBuilder
+    private func treeRow(_ row: TreeRow) -> some View {
+        switch row {
+        case .group(let group):
+            GroupRowView(group: group, model: model) { preview(page: $0) }
+        case .page(let index, let group):
+            PageRowView(index: index, group: group, model: model) { preview(page: $0) }
         }
     }
 
@@ -227,84 +266,232 @@ private struct DropWell: View {
     }
 }
 
-/// One page in the review list.
-private struct PageRowView: View {
-    let page: PageRow
-    @ObservedObject var model: AppModel
-    let onPreview: () -> Void
+/// What a dragged row carries. A plain string keeps the drag inside this app
+/// without having to declare a uniform type identifier in the bundle.
+enum DragPayload {
+    static let types: [UTType] = [.utf8PlainText, .plainText, .text]
 
-    @State private var draft: String = ""
+    static func text(for id: NodeID) -> String {
+        switch id {
+        case .part(let name): return "pmb:part:\(name)"
+        case .front:          return "pmb:front"
+        case .page(let index): return "pmb:page:\(index)"
+        }
+    }
+
+    static func id(from text: String) -> NodeID? {
+        if text == "pmb:front" { return .front }
+        if text.hasPrefix("pmb:part:") { return .part(String(text.dropFirst(9))) }
+        if text.hasPrefix("pmb:page:"), let i = Int(text.dropFirst(9)) { return .page(i) }
+        return nil
+    }
+}
+
+/// Accepting a drop: read the payload, and move what it names onto `target`.
+private struct DropTarget: ViewModifier {
+    @ObservedObject var model: AppModel
+    let target: NodeID
+    @State private var over = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(over ? Color.accentColor.opacity(0.22) : .clear))
+            .onDrop(of: DragPayload.types, isTargeted: $over) { providers in
+                guard let provider = providers.first else { return false }
+                _ = provider.loadObject(ofClass: NSString.self) { value, _ in
+                    guard let text = value as? String,
+                          let source = DragPayload.id(from: text) else { return }
+                    Task { @MainActor in model.drop(source, on: target) }
+                }
+                return true
+            }
+    }
+}
+
+private extension View {
+    func acceptsDrops(on target: NodeID, model: AppModel) -> some View {
+        modifier(DropTarget(model: model, target: target))
+    }
+
+    func draggable(as id: NodeID) -> some View {
+        onDrag { NSItemProvider(object: DragPayload.text(for: id) as NSString) }
+    }
+}
+
+/// A part at the root of the tree: its first page, its name, and the file it
+/// will be written to.
+private struct GroupRowView: View {
+    let group: PartGroup
+    @ObservedObject var model: AppModel
+    let onPreview: (Int) -> Void
+
+    @State private var draft = ""
     @FocusState private var focused: Bool
 
-    private var startsPart: Bool { page.label != nil }
+    private var first: Int { group.first ?? 0 }
+    private var showing: Bool { model.previewPage == first }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            thumbnail
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .top, spacing: 8) {
+            disclosure
+            Thumbnail(page: model.pages.indices.contains(first) ? model.pages[first] : nil,
+                      size: CGSize(width: 62, height: 80), highlighted: showing,
+                      hint: group.isFront ? "Drag onto a part to attach these pages to it"
+                                          : "Drag onto another part to merge this one into it")
+                .draggable(as: group.id)
+                .onTapGesture(count: 2) { onPreview(first) }
+            VStack(alignment: .leading, spacing: 3) {
+                name
+                Text(summary).font(.caption).foregroundStyle(.secondary)
+                if let filename = group.filename {
+                    Text(filename)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                } else {
+                    Text(model.options.frontMatter == .attach
+                         ? "added to the front of every part"
+                         : "left out of the exported parts")
+                        .font(.caption).italic().foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            Button { onPreview(first) } label: { Image(systemName: "magnifyingglass") }
+                .buttonStyle(.borderless)
+                .help("Show this page in the preview window")
+        }
+        .contentShape(Rectangle())
+        .acceptsDrops(on: group.id, model: model)
+        .contextMenu { menu }
+        .onAppear { draft = group.label }
+        .onChange(of: group.label) { _, new in if !focused { draft = new } }
+    }
+
+    @ViewBuilder
+    private var disclosure: some View {
+        if group.rest.isEmpty {
+            Color.clear.frame(width: 16, height: 16)
+        } else {
+            Button { withAnimation { model.toggle(group.id) } } label: {
+                Image(systemName: model.expanded.contains(group.id)
+                      ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.borderless)
+            .help(model.expanded.contains(group.id) ? "Hide these pages"
+                                                    : "Show the rest of this part")
+        }
+    }
+
+    @ViewBuilder
+    private var name: some View {
+        if group.isFront {
+            Text("Front matter (cover / copyright)").font(.body.weight(.medium))
+        } else {
+            TextField("part name", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 260)
+                .focused($focused)
+                .onSubmit { model.rename(draft, forPart: group.label) }
+                .onChange(of: focused) { _, isFocused in
+                    if !isFocused { model.rename(draft, forPart: group.label) }
+                }
+        }
+    }
+
+    private var summary: String {
+        let count = group.pages.count
+        return "\(count) page\(count == 1 ? "" : "s") · \(group.ranges)"
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button("Show Page \(first + 1) in Preview") { onPreview(first) }
+        if !group.isFront, first > 0 {
+            Button("Merge Into the Part Above") { model.mergeUp(at: first) }
+        }
+        if !group.isFront {
+            Button("Move to Front Matter") { model.move(pages: group.pages, to: .front) }
+        }
+    }
+}
+
+/// A page nested under the part it belongs to.
+private struct PageRowView: View {
+    let index: Int
+    let group: PartGroup
+    @ObservedObject var model: AppModel
+    let onPreview: (Int) -> Void
+
+    private var page: PageRow? {
+        model.pages.indices.contains(index) ? model.pages[index] : nil
+    }
+    private var showing: Bool { model.previewPage == index }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Color.clear.frame(width: 30, height: 1)     // indent under the part
+            Thumbnail(page: page, size: CGSize(width: 44, height: 58), highlighted: showing,
+                      hint: "Drag onto the part this page belongs to")
+                .draggable(as: .page(index))
+                .onTapGesture(count: 2) { onPreview(index) }
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("Page \(page.number) — \(Int(page.size.width))×\(Int(page.size.height)) pt"
-                         + (page.isLandscape ? " · landscape" : ""))
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button(action: onPreview) {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("See this page full size")
+                    Text(measurements).font(.caption).foregroundStyle(.secondary)
+                    Button { onPreview(index) } label: { Image(systemName: "magnifyingglass") }
+                        .buttonStyle(.borderless)
+                        .help("Show this page in the preview window")
                 }
-
-                HStack(spacing: 8) {
-                    Toggle("starts a part", isOn: Binding(
-                        get: { startsPart },
-                        set: { model.setBoundary($0, at: page.id) }))
-                        .toggleStyle(.checkbox)
-
-                    if startsPart {
-                        TextField("part name", text: $draft)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 240)
-                            .focused($focused)
-                            .onSubmit { model.rename(draft, at: page.id) }
-                            .onChange(of: focused) { _, isFocused in
-                                if !isFocused { model.rename(draft, at: page.id) }
-                            }
-                    } else {
-                        Text(continuationNote)
-                            .font(.callout).italic().foregroundStyle(.secondary)
-                    }
-                }
+                Toggle("starts a part of its own", isOn: Binding(
+                    get: { false },
+                    set: { on in if on { model.split(at: index) } }))
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .help("Tick this if the part below should have begun here")
             }
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2, perform: onPreview)
+        .acceptsDrops(on: .page(index), model: model)
         .contextMenu {
-            Button("Open Page \(page.number)…", action: onPreview)
-        }
-        .onAppear { draft = page.label ?? "" }
-        .onChange(of: page.label) { _, new in
-            if !focused { draft = new ?? "" }
+            Button("Show Page \(index + 1) in Preview") { onPreview(index) }
+            Button("Start a New Part Here") { model.split(at: index) }
+            if !group.isFront {
+                Button("Move to Front Matter") { model.move(pages: [index], to: .front) }
+            }
         }
     }
 
-    private var continuationNote: String {
-        if let above = model.inheritedLabel(before: page.id) {
-            return "↳ continues \(above)"
-        }
-        return "front matter (cover / copyright)"
+    private var measurements: String {
+        guard let page else { return "Page \(index + 1)" }
+        return "Page \(page.number) — \(Int(page.size.width))×\(Int(page.size.height)) pt"
+             + (page.isLandscape ? " · landscape" : "")
     }
+}
 
-    @ViewBuilder
-    private var thumbnail: some View {
+/// A page's picture, marked when it is the one the preview window has up.
+private struct Thumbnail: View {
+    let page: PageRow?
+    let size: CGSize
+    let highlighted: Bool
+    let hint: String
+
+    var body: some View {
         Group {
-            if let image = page.thumbnail {
+            if let image = page?.thumbnail {
                 Image(nsImage: image).resizable().scaledToFit()
             } else {
                 Rectangle().fill(.quaternary)
             }
         }
-        .frame(width: 74, height: 96)
-        .overlay(Rectangle().strokeBorder(.separator))
-        .help("Double-click to see this page full size")
+        .frame(width: size.width, height: size.height)
+        .overlay(Rectangle()
+            .strokeBorder(highlighted ? AnyShapeStyle(Color.accentColor)
+                                      : AnyShapeStyle(.separator),
+                          lineWidth: highlighted ? 2 : 1))
+        .help(hint + ". Double-click to see it full size.")
     }
 }

@@ -3,16 +3,57 @@ import PDFKit
 import AppKit
 import SwiftUI
 
-/// One page as the review list shows it.
+/// One page, and the part it belongs to.
+///
+/// Detection marks where parts begin; every page after one of those marks
+/// carries the same part forward. Keeping the answer on each page rather than
+/// only on the page that starts a part is what lets a page be dragged out of
+/// the wrong part and into the right one.
 struct PageRow: Identifiable {
-    let id: Int          // 0-based page index
-    var label: String?   // set where a part begins, nil where it continues
-    var detected: String?// what detection originally proposed
+    let id: Int             // 0-based page index
+    var part: String?       // the part it belongs to; nil is front matter
+    var detected: String?   // the name read off this page's own header
+    var detectedPart: String?  // what it belonged to when detection ran
     var size: CGSize
     var thumbnail: NSImage?
 
     var number: Int { id + 1 }
     var isLandscape: Bool { size.width > size.height }
+}
+
+/// A row in the tree. Parts sit at the root, their remaining pages beneath.
+enum NodeID: Hashable {
+    case part(String)   // keyed by normalised name, so renames regroup
+    case front
+    case page(Int)
+}
+
+/// One root of the tree: a part that will be written, or the front matter
+/// that is attached to (or left out of) every part.
+struct PartGroup: Identifiable {
+    let id: NodeID
+    let label: String       // as printed, or as renamed since
+    let filename: String?   // what will be written; nil for front matter
+    let pages: [Int]
+    let ranges: String
+
+    var isFront: Bool { id == .front }
+    /// The page the root row stands for, and the ones nested under it.
+    var first: Int? { pages.first }
+    var rest: [Int] { Array(pages.dropFirst()) }
+}
+
+/// A row as the list draws it, once the collapsed groups are folded away.
+enum TreeRow: Identifiable {
+    case group(PartGroup)
+    case page(Int, in: PartGroup)
+
+    var id: NodeID {
+        switch self {
+        case .group(let g): return g.id
+        case .page(let i, _): return .page(i)
+        }
+    }
 }
 
 /// A file that would be written, recomputed as the boundaries are edited.
@@ -43,6 +84,20 @@ final class AppModel: ObservableObject {
         didSet { replan() }
     }
 
+    /// The roots of the tree: one per part, plus the front matter.
+    @Published private(set) var groups: [PartGroup] = []
+    /// Which roots are open. Collapsed by default, so the top level reads as
+    /// the list of files that will be written.
+    @Published var expanded: Set<NodeID> = []
+    /// What is selected in the main window, and so what the partner preview
+    /// window shows -- the two always agree about what is being looked at.
+    @Published var selection: NodeID?
+    /// How that window sizes the page. Kept here so the View menu can drive it
+    /// whichever window happens to be in front.
+    @Published var previewZoom: PageZoom = .fitWidth
+    /// The scale actually in force, reported back by the preview for its readout.
+    @Published var previewScale: CGFloat = 1
+
     var isLoaded: Bool { document != nil }
 
     // MARK: - Loading
@@ -72,15 +127,21 @@ final class AppModel: ObservableObject {
         options.title = title.isEmpty ? Self.titleFromFilename(url) : title
         options.prefix = Self.prefixFromFolder(url)
 
+        // A page with no name of its own belongs to the part above it.
+        var owner: String? = nil
         pages = (0..<doc.pageCount).map { i in
+            if let read = labels[i] { owner = read }
             let page = doc.page(at: i)
             return PageRow(id: i,
-                           label: labels[i],
+                           part: owner,
                            detected: labels[i],
+                           detectedPart: owner,
                            size: page?.bounds(for: .mediaBox).size ?? .zero,
                            thumbnail: nil)
         }
+        expanded = []
         replan()
+        selection = node(for: 0)
         warnIfSuspicious(doc: doc, labels: labels)
         loadThumbnails()
     }
@@ -88,6 +149,8 @@ final class AppModel: ObservableObject {
     private func fail(_ message: String) {
         document = nil
         pages = []
+        groups = []
+        selection = nil
         parts = []
         files = []
         notice = message
@@ -130,52 +193,221 @@ final class AppModel: ObservableObject {
 
     // MARK: - Editing
 
-    func setBoundary(_ on: Bool, at index: Int) {
+    /// Split a part so that `index` begins one of its own.
+    ///
+    /// The pages that ran on from it come too: a boundary that detection put
+    /// one page late is fixed by ticking the page it should have been on.
+    func split(at index: Int) {
         guard pages.indices.contains(index) else { return }
-        if on {
-            let fallback = pages[index].detected ?? "Part \(index + 1)"
-            pages[index].label = fallback
-        } else {
-            pages[index].label = nil
+        var name = pages[index].detected ?? "Part \(index + 1)"
+        if normalised(name) == pages[index].part.map(normalised) {
+            // Its header names the part it is already in, so a split needs a
+            // name of its own -- grouping would otherwise put it straight
+            // back, and the tick would appear to do nothing.
+            name = fresh("Part \(index + 1)")
         }
+        assign(name, toRunAt: index)
+    }
+
+    private func normalised(_ label: String) -> String {
+        Naming.normalise(label, aliases: Naming.defaultAliases)
+    }
+
+    /// A name no existing part answers to.
+    private func fresh(_ base: String) -> String {
+        let taken = Set(parts.map(\.name))
+        var candidate = base
+        var n = 2
+        while taken.contains(normalised(candidate)) {
+            candidate = "\(base) \(n)"
+            n += 1
+        }
+        return candidate
+    }
+
+    /// Fold a part into the one above it, for a boundary that is not real.
+    func mergeUp(at index: Int) {
+        guard index > 0, pages.indices.contains(index) else { return }
+        assign(pages[index - 1].part, toRunAt: index)
+    }
+
+    /// Rename a whole part, from any of its pages.
+    func rename(_ text: String, forPart old: String?) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != old else { return }
+        for i in pages.indices where pages[i].part == old { pages[i].part = trimmed }
         replan()
     }
 
-    func rename(_ text: String, at index: Int) {
-        guard pages.indices.contains(index) else { return }
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        pages[index].label = trimmed.isEmpty ? nil : trimmed
+    /// Act on a drag from one row onto another.
+    func drop(_ source: NodeID, on target: NodeID) {
+        guard source != target else { return }
+        let moved: [Int]
+        switch source {
+        case .page(let i):  moved = [i]
+        case .part, .front: moved = groups.first { $0.id == source }?.pages ?? []
+        }
+        guard !moved.isEmpty else { return }
+        // A page dropped on itself, or a part on one of its own pages.
+        if case .page(let onto) = target, moved.contains(onto) { return }
+        move(pages: moved, to: target)
+    }
+
+    /// Move pages into another part, or out to the front matter.
+    func move(pages moved: [Int], to target: NodeID) {
+        let label = self.label(of: target)
+        for i in moved where pages.indices.contains(i) { pages[i].part = label }
         replan()
+        // Land the selection on what was moved, and open the part it went to.
+        if let first = moved.sorted().first {
+            reveal(first)
+            selection = node(for: first)
+        }
     }
 
     func resetToDetected() {
-        for i in pages.indices { pages[i].label = pages[i].detected }
+        for i in pages.indices { pages[i].part = pages[i].detectedPart }
         replan()
     }
 
-    /// What part a page belongs to, for the "continues …" hint.
-    func inheritedLabel(before index: Int) -> String? {
-        for i in stride(from: index, through: 0, by: -1) {
-            if let l = pages[i].label { return l }
+    /// Give `index` and the pages running on from it a new owner.
+    private func assign(_ label: String?, toRunAt index: Int) {
+        let old = pages[index].part
+        guard old != label else { return }
+        var i = index
+        while i < pages.count, pages[i].part == old {
+            pages[i].part = label
+            i += 1
         }
-        return nil
+        replan()
+        // Show what just happened, wherever the page ended up.
+        reveal(index)
+        selection = node(for: index)
     }
 
+    private func label(of target: NodeID) -> String? {
+        switch target {
+        case .front:            return nil
+        case .part:             return groups.first { $0.id == target }?.label
+        case .page(let index):  return pages.indices.contains(index)
+                                     ? pages[index].part : nil
+        }
+    }
+
+    // MARK: - The tree
+
+    /// The rows to draw, with collapsed groups folded away.
+    var rows: [TreeRow] {
+        groups.flatMap { group -> [TreeRow] in
+            guard expanded.contains(group.id) else { return [.group(group)] }
+            return [.group(group)] + group.rest.map { .page($0, in: group) }
+        }
+    }
+
+    func group(containing index: Int) -> PartGroup? {
+        groups.first { $0.pages.contains(index) }
+    }
+
+    /// The row that stands for a page: its own, or the root it begins.
+    func node(for index: Int) -> NodeID {
+        guard let group = group(containing: index) else { return .page(index) }
+        return group.first == index ? group.id : .page(index)
+    }
+
+    /// Whether a page begins its part, which is what the preview's tick means.
+    func isPartStart(_ index: Int) -> Bool {
+        group(containing: index)?.first == index
+    }
+
+    /// Open the group a page sits in, so the row can be seen and selected.
+    func reveal(_ index: Int) {
+        guard let group = group(containing: index), group.first != index else { return }
+        expanded.insert(group.id)
+    }
+
+    func toggle(_ id: NodeID) {
+        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+    }
+
+    func expandAll()   { expanded = Set(groups.map(\.id)) }
+    func collapseAll() { expanded = [] }
+
+    // MARK: - Preview
+
+    /// The page the partner preview window is showing: the selected page, or
+    /// the first page of the selected part.
+    var previewPage: Int? {
+        switch selection {
+        case .page(let i):  return pages.indices.contains(i) ? i : nil
+        case .part, .front: return groups.first { $0.id == selection }?.first
+        case nil:           return nil
+        }
+    }
+
+    /// Show a page in the partner window, and mark it in the tree.
+    func select(_ index: Int) {
+        guard pages.indices.contains(index) else { return }
+        reveal(index)
+        selection = node(for: index)
+    }
+
+    /// Page the preview forwards or back, stopping at either end.
+    func stepSelection(by delta: Int) {
+        let next = (previewPage ?? 0) + delta
+        guard pages.indices.contains(next) else { return }
+        select(next)
+    }
+
+    /// Zoom relative to what is on screen now, which is what the reader means
+    /// by "bigger" whether they were fitting the width or at an exact size.
+    func zoom(by factor: CGFloat) {
+        previewZoom = .factor(min(10, max(0.1, previewScale * factor)))
+    }
+
+    /// Rebuild the parts, the files they would produce, and the tree.
+    ///
+    /// Pages are grouped by name rather than by position, so a part that is
+    /// interrupted and resumed later -- or one dragged back together by
+    /// hand -- lands in a single file, as `Detection.group` does.
     private func replan() {
-        guard let doc = document else { parts = []; files = []; return }
-        let labels = pages.map(\.label)
-        let grouped = Detection.group(labels: labels,
-                                      aliases: Naming.defaultAliases,
-                                      pageCount: doc.pageCount)
-        parts = grouped.parts
-        front = grouped.front
+        guard document != nil else { parts = []; files = []; groups = []; front = []; return }
+        var built: [Part] = []
+        var index: [String: Int] = [:]
+        var frontPages: [Int] = []
+        for page in pages {
+            guard let label = page.part else { frontPages.append(page.id); continue }
+            let name = Naming.normalise(label, aliases: Naming.defaultAliases)
+            if let at = index[name] {
+                built[at].pages.append(page.id)
+            } else {
+                index[name] = built.count
+                built.append(Part(name: name, label: label, pages: [page.id]))
+            }
+        }
+        parts = built
+        front = frontPages
+
         let extra = options.frontMatter == .attach ? front.count : 0
-        files = grouped.parts.map {
+        files = built.map {
             PlannedFile(filename: options.filename(for: $0),
                         label: $0.label,
                         pageCount: $0.pages.count + extra,
                         ranges: $0.ranges)
         }
+
+        var roots = built.map {
+            PartGroup(id: .part($0.name), label: $0.label,
+                      filename: options.filename(for: $0),
+                      pages: $0.pages, ranges: $0.ranges)
+        }
+        if !front.isEmpty {
+            roots.insert(PartGroup(id: .front, label: "Front matter",
+                                   filename: nil, pages: front,
+                                   ranges: Part(name: "", label: "", pages: front).ranges),
+                         at: 0)
+        }
+        groups = roots
+        expanded.formIntersection(roots.map(\.id))   // drop groups that are gone
     }
 
     // MARK: - Documents
@@ -206,6 +438,9 @@ final class AppModel: ObservableObject {
         document = nil
         sourceName = ""
         pages = []
+        groups = []
+        expanded = []
+        selection = nil
         parts = []
         files = []
         front = []

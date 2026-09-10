@@ -57,7 +57,10 @@ pdf-music-breakout --version
 ## The Mac app
 
 There's a native macOS app — a real `.app` that lives in `/Applications`, not
-a browser window. Build and install it from a checkout:
+a browser window. Download the signed build from
+[Releases](https://github.com/sandinak/pdf-music-breakout/releases/latest) —
+one universal binary for Apple Silicon and Intel, macOS 14 or later — or build
+it from a checkout:
 
 ```bash
 make app-install        # into /Applications
@@ -65,10 +68,36 @@ make app-run            # or just build and launch it
 ```
 
 Open a combined PDF by dropping it on the window, double-clicking it in the
-Finder, or dropping it on the Dock icon. You get a thumbnail of every page
-with the detected part boundaries marked; tick or untick a page to add or
-remove a boundary, rename anything that came out wrong, and the list of files
-updates as you go. Export writes one PDF per part into a folder you choose.
+Finder, or dropping it on the Dock icon. What you get is a tree: one row per
+part it found — named, with the file it would write and the pages it covers —
+and the rest of that part's pages folded inside it. So the top level reads as
+the list of files you are about to get, and anything odd stands out.
+
+Fixing what detection got wrong is drag and drop. Drag a page's picture onto
+the part it really belongs to; drag a whole part onto another to merge the
+two; drop either onto *Front matter* to take it out of the parts entirely.
+A page that should have begun a part of its own has a tick for that, and
+every part can be renamed in place. The file list updates as you go, and
+Reset puts every page back where detection had it.
+
+Export (⌘S) writes one PDF per part into a folder you choose.
+
+When a thumbnail is too small to tell a second trumpet part from a first,
+open the preview window (⌥⌘P, or double-click a page). It sits beside the
+main window and shows whichever page is selected there, big enough to read:
+it fits the width by default, and zooms with ⌘+ / ⌘− , ⌘0 for actual size,
+or a pinch. The part boundary and its name can be edited from that window
+too, so a misread gets fixed while you are looking at the evidence.
+
+| | |
+|---|---|
+| ⌘O | open a combined PDF |
+| ⌘S | export the parts, into a folder you pick |
+| ⌥⌘P | show the preview window |
+| ⌘+ / ⌘− | zoom the preview in and out |
+| ⌘0 / ⌘9 / ⌘8 | actual size / fit the page / fit its width |
+| ← / → | previous and next page, in the preview window |
+| ⇧⌘W | close the document and start again |
 
 It is written in Swift against Apple's own PDFKit, so it carries **no Python
 and no third-party dependencies at all** — nothing to install first, and none
@@ -217,6 +246,8 @@ Full list: `pdf_music_breakout.py --help`
 | `make split PDF=x.pdf` | split a file without installing (add `OUT=dir` to write) |
 | `make app` | build the native Mac app |
 | `make app-install` | build it and install into /Applications |
+| `make app-dist` | build it signed with your Developer ID, and zip it |
+| `make app-notarize` | that, then send it to Apple to be notarised |
 | `make app-verify` | check the app's detection matches the Python one |
 | `make install` | put it on PATH with uv or pipx |
 | `make brew-install` | tap this repo and install through Homebrew |
@@ -242,6 +273,17 @@ pushes, waits for GitHub to build the tag tarball, then rewrites the
 formula's URL and `sha256` and pushes that too. It refuses to start on a
 dirty tree, and refuses entirely if you don't name a version.
 
+It then builds the Mac app as a universal binary, signs it with the Developer
+ID certificate in your keychain, and attaches the `.zip` to the GitHub
+release. If a notarytool keychain profile called `pdf-music-breakout` exists
+it notarises and staples it first, so the download opens without a Gatekeeper
+warning. Set that up once with:
+
+```bash
+xcrun notarytool store-credentials pdf-music-breakout \
+    --apple-id you@example.com --team-id TEAMID --password APP-SPECIFIC-PASSWORD
+```
+
 ## Licence
 
 AGPL-3.0-or-later.
@@ -254,6 +296,6 @@ the Mac App Store does not get along with AGPL terms.
 
 **The Mac app is not affected.** It uses Apple's PDFKit and links nothing
 third-party, so it carries no such constraint. That was a deliberate reason
-to write it in Swift rather than wrap the Python: if this ever wants to be a
-signed download or an iPad app, the native side is already clear of the
-problem.
+to write it in Swift rather than wrap the Python: the app can be handed to
+someone as a signed download — which is how it now ships — without dragging
+the AGPL along, and an iPad version would be clear of the problem too.
