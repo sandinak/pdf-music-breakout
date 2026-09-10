@@ -20,6 +20,27 @@ APP_SRC  := $(wildcard macapp/Sources/*.swift)
 # Make splits target names on spaces, so build under a plain name and only
 # use the display name when installing.
 APP_OUT  := build/PDFMusicBreakout.app
+APP_ZIP   = build/PDFMusicBreakout-v$(VERSION).zip
+# Built for every Mac that can run it, not just the one it was built on:
+# a bare swiftc targets the host's macOS, which would refuse to launch
+# anywhere older.
+MACOS_MIN := 14.0
+ARCHS     := arm64 x86_64
+# Signing. Ad-hoc is all a local build needs; a release is signed with the
+# Developer ID certificate so the app opens on someone else's Mac.
+DEV_ID    = $(shell security find-identity -v -p codesigning 2>/dev/null | \
+              sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+SIGN_ID  ?= -
+# Notarisation credentials: a notarytool keychain profile, or the same
+# APPLE_* variables the other projects here keep in a .env. Set the profile
+# up once with:
+#   xcrun notarytool store-credentials pdf-music-breakout \
+#       --apple-id ... --team-id ... --password <app-specific>
+NOTARY_PROFILE ?= pdf-music-breakout
+NOTARY_AUTH = $(if $(APPLE_APP_SPECIFIC_PASSWORD),--apple-id "$(APPLE_ID)" \
+    --team-id "$(APPLE_TEAM_ID)" --password "$(APPLE_APP_SPECIFIC_PASSWORD)",\
+    --keychain-profile "$(NOTARY_PROFILE)")
+GH       ?= gh
 # Whether VERSION was supplied on the command line, so `release` can insist.
 VERSION_GIVEN := $(filter command line,$(origin VERSION))
 TARBALL  = $(REPO)/archive/refs/tags/v$(VERSION).tar.gz
@@ -79,14 +100,42 @@ uninstall: ## Remove the uv/pipx installation
 # ------------------------------------------------------------------ mac app
 
 $(APP_OUT)/Contents/MacOS/PDFMusicBreakout: $(APP_SRC) macapp/Info.plist.in $(MODULE)
-	@echo "==> building $(APP_NAME) $(VERSION)"
+	@echo "==> building $(APP_NAME) $(VERSION) for $(ARCHS)"
 	@mkdir -p $(APP_OUT)/Contents/MacOS $(APP_OUT)/Contents/Resources
-	@sed 's/@VERSION@/$(VERSION)/g' macapp/Info.plist.in > $(APP_OUT)/Contents/Info.plist
-	@swiftc -O -parse-as-library $(APP_SRC) -o $@
-	@codesign --force --sign - $(APP_OUT) 2>/dev/null || echo "    (unsigned)"
+	@sed -e 's/@VERSION@/$(VERSION)/g' -e 's/@MACOS_MIN@/$(MACOS_MIN)/g' \
+		macapp/Info.plist.in > $(APP_OUT)/Contents/Info.plist
+	@for arch in $(ARCHS); do \
+		swiftc -O -parse-as-library -target $$arch-apple-macos$(MACOS_MIN) \
+			$(APP_SRC) -o build/pmb-$$arch || exit 1; \
+	done
+	@lipo -create $(addprefix build/pmb-,$(ARCHS)) -o $@
+	@rm -f $(addprefix build/pmb-,$(ARCHS))
+	@if [ "$(SIGN_ID)" = "-" ]; then \
+		codesign --force --sign - $(APP_OUT) 2>/dev/null || echo "    (unsigned)"; \
+	else \
+		echo "==> signing as $(SIGN_ID)"; \
+		codesign --force --options runtime --timestamp \
+			--sign "$(SIGN_ID)" $(APP_OUT); \
+	fi
 
 app: $(APP_OUT)/Contents/MacOS/PDFMusicBreakout ## Build the native macOS app
 	@echo "built: $(APP_OUT)"
+
+app-dist: ## Build a Developer ID signed, zipped app for release
+	@test -n "$(DEV_ID)" || { echo "no Developer ID Application certificate"; exit 1; }
+	@rm -rf $(APP_OUT)
+	@$(MAKE) --no-print-directory app SIGN_ID="$(DEV_ID)"
+	@codesign --verify --strict $(APP_OUT)
+	@rm -f $(APP_ZIP)
+	@ditto -c -k --keepParent $(APP_OUT) $(APP_ZIP)
+	@echo "built: $(APP_ZIP)"
+
+app-notarize: app-dist ## Notarise the signed app so it opens without a warning
+	@xcrun notarytool submit $(APP_ZIP) $(NOTARY_AUTH) --wait
+	@xcrun stapler staple $(APP_OUT)
+	@rm -f $(APP_ZIP)
+	@ditto -c -k --keepParent $(APP_OUT) $(APP_ZIP)
+	@echo "notarised: $(APP_ZIP)"
 
 app-run: app ## Build and launch the app
 	@open $(APP_OUT)
@@ -153,6 +202,15 @@ release: ## Cut a release (make release VERSION=0.1.2)
 	echo "    sha256 $$sha"
 	@git add $(FORMULA) && git commit -q -m "Point the formula at v$(VERSION)"
 	@git push -q origin main
+	@echo "==> building the app for the release"
+	@if xcrun notarytool history $(NOTARY_AUTH) >/dev/null 2>&1; then \
+		$(MAKE) --no-print-directory app-notarize; \
+	else \
+		$(MAKE) --no-print-directory app-dist; \
+		echo "    (no notarytool profile '$(NOTARY_PROFILE)' -- signed, not notarised)"; \
+	fi
+	@$(GH) release create "v$(VERSION)" $(APP_ZIP) \
+		--title "v$(VERSION)" --generate-notes
 	@echo "==> released v$(VERSION)"
 
 # --------------------------------------------------------------------- tidying
@@ -175,6 +233,6 @@ help: ## Show this help
 	@echo "  variables: PDF= OUT= PORT=$(PORT) APP_DEST=$(APP_DEST)"
 
 .PHONY: dev test test-v lint serve split install uninstall \
-        app app-run app-install app-verify \
+        app app-run app-install app-verify app-dist app-notarize \
         brew-tap brew-install brew-reinstall brew-test brew-uninstall \
         formula-sha dist release clean distclean help

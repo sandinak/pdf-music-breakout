@@ -9,7 +9,7 @@
   <key>CFBundleVersion</key>            <string>@VERSION@</string>
   <key>CFBundleShortVersionString</key> <string>@VERSION@</string>
   <key>CFBundlePackageType</key>        <string>APPL</string>
-  <key>LSMinimumSystemVersion</key>     <string>13.0</string>
+  <key>LSMinimumSystemVersion</key>     <string>@MACOS_MIN@</string>
   <key>NSHighResolutionCapable</key>    <true/>
   <key>NSPrincipalClass</key>           <string>NSApplication</string>
   <key>CFBundleDocumentTypes</key>

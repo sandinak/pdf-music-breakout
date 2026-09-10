@@ -275,9 +275,14 @@ dirty tree, and refuses entirely if you don't name a version.
 
 It then builds the Mac app as a universal binary, signs it with the Developer
 ID certificate in your keychain, and attaches the `.zip` to the GitHub
-release. If a notarytool keychain profile called `pdf-music-breakout` exists
-it notarises and staples it first, so the download opens without a Gatekeeper
-warning. Set that up once with:
+release. If it can find notarisation credentials it notarises and staples the
+app first, so the download opens without a Gatekeeper warning — otherwise it
+still attaches the signed build and says so.
+
+Credentials come from either a notarytool keychain profile called
+`pdf-music-breakout`, or `APPLE_ID` / `APPLE_TEAM_ID` /
+`APPLE_APP_SPECIFIC_PASSWORD` in the environment. Set the profile up once
+with:
 
 ```bash
 xcrun notarytool store-credentials pdf-music-breakout \

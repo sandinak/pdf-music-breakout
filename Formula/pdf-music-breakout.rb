@@ -57,8 +57,10 @@ class PdfMusicBreakout < Formula
       To review and correct the split in a browser before writing files:
         pdf-music-breakout --serve
 
-      There is also a native Mac app, built from a checkout with `make
-      app-install`. It needs no Python and is not installed by this formula.
+      There is also a native Mac app, which needs no Python and is not
+      installed by this formula. Download the signed build from
+      https://github.com/sandinak/pdf-music-breakout/releases/latest
+      or build it from a checkout with `make app-install`.
     EOS
   end
 
