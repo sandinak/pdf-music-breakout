@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-music-breakout"
+version = "0.1.0"
+description = "Split a combined music PDF into one printable PDF per instrument part."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+keywords = ["pdf", "sheet music", "score", "parts", "band", "choir", "orchestra"]
+dependencies = ["pymupdf>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+pdf-music-breakout = "pdf_music_breakout:main"
+
+[tool.setuptools]
+py-modules = ["pdf_music_breakout"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
