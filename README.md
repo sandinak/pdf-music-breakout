@@ -355,10 +355,16 @@ finish. If it can find notarisation credentials it notarises and staples the
 app first, so the download opens without a Gatekeeper warning — otherwise it
 still attaches the signed build and says so.
 
+If it cannot find credentials it **stops** rather than attaching a build
+Gatekeeper will refuse, and tells you how to finish by hand; `NOTARIZE=0`
+ships a signed-only build on purpose.
+
 Credentials come from either a notarytool keychain profile called
 `pdf-music-breakout`, or `APPLE_ID` / `APPLE_TEAM_ID` /
-`APPLE_APP_SPECIFIC_PASSWORD` in the environment. Set the profile up once
-with:
+`APPLE_APP_SPECIFIC_PASSWORD` in the environment. Prefer the environment for
+an unattended release: a keychain profile can only be read while the login
+keychain is unlocked, so releasing from a machine you have walked away from
+finds no credentials at all. Set the profile up once with:
 
 ```bash
 xcrun notarytool store-credentials pdf-music-breakout \

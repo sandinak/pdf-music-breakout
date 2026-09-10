@@ -37,6 +37,9 @@ SIGN_ID  ?= -
 #   xcrun notarytool store-credentials pdf-music-breakout \
 #       --apple-id ... --team-id ... --password <app-specific>
 NOTARY_PROFILE ?= pdf-music-breakout
+# Not optional for a release: an app Gatekeeper refuses to open is worse than
+# no download at all. NOTARIZE=0 ships a signed build on purpose.
+NOTARIZE ?= 1
 NOTARY_AUTH = $(if $(APPLE_APP_SPECIFIC_PASSWORD),--apple-id "$(APPLE_ID)" \
     --team-id "$(APPLE_TEAM_ID)" --password "$(APPLE_APP_SPECIFIC_PASSWORD)",\
     --keychain-profile "$(NOTARY_PROFILE)")
@@ -257,11 +260,23 @@ release: ## Cut a release (make release VERSION=0.1.2)
 	@git add $(FORMULA) && git commit -q -m "Point the formula at v$(VERSION)"
 	@git push -q origin main
 	@echo "==> building the app for the release"
-	@if xcrun notarytool history $(NOTARY_AUTH) >/dev/null 2>&1; then \
+	@if [ "$(NOTARIZE)" = "0" ]; then \
+		$(MAKE) --no-print-directory app-dist; \
+		echo "    NOTARIZE=0: signed but not notarised, so Gatekeeper will warn"; \
+	elif xcrun notarytool history $(NOTARY_AUTH) >/dev/null 2>&1; then \
 		$(MAKE) --no-print-directory app-notarize; \
 	else \
-		$(MAKE) --no-print-directory app-dist; \
-		echo "    (no notarytool profile '$(NOTARY_PROFILE)' -- signed, not notarised)"; \
+		echo "==> STOPPING: no notarisation credentials"; \
+		echo "    The keychain profile cannot be read while the login keychain is"; \
+		echo "    locked, which is what an unattended machine looks like."; \
+		echo "    Unlock it, or export APPLE_ID, APPLE_TEAM_ID and"; \
+		echo "    APPLE_APP_SPECIFIC_PASSWORD, then finish the release with:"; \
+		echo ""; \
+		echo "        make app-notarize"; \
+		echo "        gh release upload v$(VERSION) $(APP_ZIP) --clobber"; \
+		echo ""; \
+		echo "    Or re-run with NOTARIZE=0 to ship signed-only on purpose."; \
+		exit 1; \
 	fi
 	@$(GH) release upload "v$(VERSION)" $(APP_ZIP) --clobber
 	@echo "==> released v$(VERSION): $(RELEASE_URL)"
