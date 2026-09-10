@@ -1,10 +1,19 @@
+# Environments
 .venv/
+.local/
+
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
-*.egg-info/
+
+# Build artefacts
 build/
 dist/
+*.egg-info/
+*.dist-info/
+
+# Tool output
 out/
 
 # Sheet music is licensed content and must not be published with the code.
