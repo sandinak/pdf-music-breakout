@@ -18,3 +18,8 @@ out/
 
 # Sheet music is licensed content and must not be published with the code.
 *.pdf
+
+# Desktop shell
+desktop/node_modules/
+desktop/dist/
+desktop/sidecar/

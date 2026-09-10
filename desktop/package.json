@@ -1,0 +1,31 @@
+{
+  "name": "pdf-music-breakout-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop shell for the pdf-music-breakout review UI",
+  "license": "AGPL-3.0-or-later",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "shot": "electron . --screenshot=../build/desktop-shot.png",
+    "dist:win": "electron-builder --win -p never",
+    "dist:mac": "electron-builder --mac -p never",
+    "dist:linux": "electron-builder --linux -p never"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "io.github.sandinak.pdf-music-breakout",
+    "productName": "PDF Music Breakout",
+    "files": ["main.js", "package.json"],
+    "extraResources": [
+      { "from": "sidecar", "to": "sidecar" }
+    ],
+    "win": { "target": ["nsis", "zip"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "mac": { "target": ["zip"], "category": "public.app-category.music" },
+    "linux": { "target": ["AppImage"], "category": "Audio" }
+  }
+}

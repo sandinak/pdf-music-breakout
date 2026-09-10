@@ -281,6 +281,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/analyze":
                 self._analyze()
+            elif path == "/api/open":
+                self._open()
             elif path == "/api/plan":
                 self._plan()
             elif path == "/api/export":
@@ -296,6 +298,22 @@ class Handler(BaseHTTPRequestHandler):
         if not data:
             raise ValueError("no file received")
         self._json(200, analyse(self.state, data, filename))
+
+    def _open(self):
+        """Read a PDF the desktop shell picked, by path rather than upload.
+
+        The shell has the file already; sending its bytes back to a server on
+        this same machine would only be slower. Reading it is no more than the
+        export side already does when it writes into a folder you name, and
+        the server listens on the loopback interface only.
+        """
+        body = json.loads(self._read_body() or b"{}")
+        source = Path(body.get("path", "")).expanduser()
+        if not source.is_file():
+            raise ValueError(f"no such file: {source}")
+        opened = analyse(self.state, source.read_bytes(), source.name)
+        type(self).opened = opened
+        self._json(200, opened)
 
     @staticmethod
     def _owners(session: Session, body: dict) -> list[str | None]:
@@ -383,8 +401,11 @@ def serve(port: int = 8756, open_browser: bool = True,
                                  Path(source).name)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"pdf-music-breakout is running at {url}")
-    print("Drop a combined PDF onto the page. Press Ctrl+C to stop.")
+    # Flushed, because something is usually reading this: a wrapper that
+    # starts the server and waits to be told where it is sees nothing at all
+    # while Python holds a block-buffered pipe.
+    print(f"pdf-music-breakout is running at {url}", flush=True)
+    print("Drop a combined PDF onto the page. Press Ctrl+C to stop.", flush=True)
     if open_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
