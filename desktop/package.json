@@ -19,13 +19,43 @@
   "build": {
     "appId": "io.github.sandinak.pdf-music-breakout",
     "productName": "PDF Music Breakout",
-    "files": ["main.js", "package.json"],
-    "extraResources": [
-      { "from": "sidecar", "to": "sidecar" }
+    "files": [
+      "main.js",
+      "package.json"
     ],
-    "win": { "target": ["nsis", "zip"] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
-    "mac": { "target": ["zip"], "category": "public.app-category.music" },
-    "linux": { "target": ["AppImage"], "category": "Audio" }
+    "extraResources": [
+      {
+        "from": "sidecar",
+        "to": "sidecar"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.music",
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Audio",
+      "icon": "assets/icon.png"
+    },
+    "directories": {
+      "buildResources": "assets"
+    }
   }
 }
