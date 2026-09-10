@@ -30,6 +30,17 @@ function sidecar() {
   return { command: python, args: [path.join(repo, 'pdf_music_breakout.py')] };
 }
 
+/** The environment the sidecar should see, rather than the one we were given. */
+function childEnv() {
+  // Belt and braces: the server flushes the line we wait for, but a buffered
+  // pipe would hide it and look exactly like a hang.
+  const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+  // Set in some shells, and it turns any Electron we might spawn into a bare
+  // Node interpreter. Not ours to pass on.
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
+}
+
 /**
  * Start the server and wait for it to say where it is.
  *
@@ -43,9 +54,7 @@ function startServer() {
     server = spawn(command, [...args, '--serve', '--no-browser'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      // Belt and braces: the server flushes the line we are waiting for, but
-      // a buffered pipe would hide it and look exactly like a hang.
-      env: { ...process.env, PYTHONUNBUFFERED: '1', ELECTRON_RUN_AS_NODE: undefined },
+      env: childEnv(),
     });
 
     let out = '';
@@ -114,8 +123,12 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        { label: 'Previous Page', accelerator: 'Left', click: () => zoom('step(-1)') },
-        { label: 'Next Page', accelerator: 'Right', click: () => zoom('step(1)') },
+        // Not a bare Left/Right: a menu accelerator is taken before the page
+        // sees the key, so typing a part name would page the preview. The
+        // page handles unmodified arrows itself, and knows when you are
+        // typing into a field.
+        { label: 'Previous Page', accelerator: 'CmdOrCtrl+Left', click: () => zoom('step(-1)') },
+        { label: 'Next Page', accelerator: 'CmdOrCtrl+Right', click: () => zoom('step(1)') },
         { type: 'separator' },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => zoom('zoomBy(1.25)') },
         { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoom('zoomBy(0.8)') },
