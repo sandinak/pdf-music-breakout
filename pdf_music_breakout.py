@@ -342,9 +342,16 @@ def ocr_lines(image: bytes, page_width: float, engine: str) -> list[HeaderLine]:
     come back as one line that is nobody's part name. Words on the same row
     with more than a couple of letter heights between them are separate lines.
     """
+    # One thread each. Pages are already read in parallel, and a Tesseract
+    # built with OpenMP -- Debian's, and the usual Windows build -- also
+    # starts a thread per core for every page, so eight of them on a
+    # four-core machine spent their time fighting: a thirty-page book took
+    # three minutes on Linux and five seconds on a Mac whose build had none.
+    env = {**os.environ, "OMP_THREAD_LIMIT": "1"}
     try:
         done = subprocess.run([engine, "stdin", "stdout", "--psm", "11", "tsv"],
-                              input=image, capture_output=True, timeout=120, check=True)
+                              input=image, capture_output=True, timeout=120,
+                              check=True, env=env)
     except (OSError, subprocess.SubprocessError):
         return []
 
