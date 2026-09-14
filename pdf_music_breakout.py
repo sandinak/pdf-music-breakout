@@ -29,10 +29,14 @@ __version__ = "1.1.0"
 
 import argparse
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 import unicodedata
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -239,6 +243,7 @@ class HeaderLine:
     x1: float
     y0: float
     page_width: float
+    height: float = 0.0   # how big it is set: a title is the largest type
 
     @property
     def is_outer(self) -> bool:
@@ -276,7 +281,148 @@ def header_lines(page, band: float) -> list[HeaderLine]:
                 continue
             text = _clean("".join(s["text"] for s in line["spans"]))
             if text:
-                lines.append(HeaderLine(text, x0, x1, y0, width))
+                lines.append(HeaderLine(text, x0, x1, y0, width, y1 - y0))
+    return lines
+
+
+# --------------------------------------------------------------------------
+# Pages that are pictures
+# --------------------------------------------------------------------------
+
+# Resolution the header band is rendered at for OCR. Part names are set in
+# 9-12pt type; below about 200 dpi Tesseract starts confusing "1" with "I".
+OCR_DPI = 300
+# Tesseract's per-word confidence, 0-100. Staff lines, noteheads and
+# dynamics come back as confident-looking junk ("putes gs eee") at 20-50;
+# real words in a header sit well above this.
+OCR_MIN_CONFIDENCE = 60
+
+
+def ocr_engine() -> str | None:
+    """Tesseract, if it is installed. OCR is used only when it is.
+
+    The Windows installer puts it in Program Files and leaves PATH alone, so
+    a working install would otherwise look like a missing one.
+    """
+    found = shutil.which("tesseract")
+    if found or os.name != "nt":
+        return found
+    for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"),
+                 os.environ.get("LOCALAPPDATA") and
+                 os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
+        candidate = root and os.path.join(root, "Tesseract-OCR", "tesseract.exe")
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _has_text(page) -> bool:
+    return bool(page.get_text("text").strip())
+
+
+def _render_band(page, band: float) -> bytes:
+    clip = pymupdf.Rect(0, 0, page.rect.width, page.rect.height * band)
+    pix = page.get_pixmap(dpi=OCR_DPI, clip=clip, colorspace=pymupdf.csGRAY, alpha=False)
+    return pix.tobytes("png")
+
+
+def ocr_lines(image: bytes, page_width: float, engine: str) -> list[HeaderLine]:
+    """Read the header band of a page that is only a picture.
+
+    Scans, and the "ePrint" parts music publishers sell, carry no text at all,
+    so there is nothing for detection to read until something reads the
+    picture. Tesseract's word boxes are grouped into header lines the way a
+    real text layer would have them.
+
+    Two things about how it is asked. It runs in sparse-text mode, because in
+    its default mode a whole line is normalised to one text size: a part name
+    at 11pt beside a 22pt title had its digits mangled, "Alto Sax 1" read as
+    "Alto Sax 4". And its line grouping is not used at all, since a part name
+    in one corner and the arranger credit in the other share a baseline and
+    come back as one line that is nobody's part name. Words on the same row
+    with more than a couple of letter heights between them are separate lines.
+    """
+    try:
+        done = subprocess.run([engine, "stdin", "stdout", "--psm", "11", "tsv"],
+                              input=image, capture_output=True, timeout=120, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    words: list[tuple[int, int, int, int, str]] = []
+    for record in done.stdout.decode("utf-8", "replace").splitlines()[1:]:
+        cols = record.split("\t")
+        if len(cols) < 12 or cols[0] != "5":
+            continue
+        text = cols[11].strip()
+        try:
+            conf = float(cols[10])
+            left, top, width, height = (int(c) for c in cols[6:10])
+        except ValueError:
+            continue
+        if text and conf >= OCR_MIN_CONFIDENCE and height > 0:
+            words.append((left, top, width, height, text))
+
+    # Rows: words whose boxes overlap by at least half the smaller height.
+    rows: list[list[tuple[int, int, int, int, str]]] = []
+    for word in sorted(words, key=lambda w: w[1]):
+        for row in rows:
+            top = min(w[1] for w in row)
+            bottom = max(w[1] + w[3] for w in row)
+            overlap = min(bottom, word[1] + word[3]) - max(top, word[1])
+            if overlap >= 0.5 * min(word[3], bottom - top):
+                row.append(word)
+                break
+        else:
+            rows.append([word])
+
+    scale = 72 / OCR_DPI
+    lines: list[HeaderLine] = []
+    for row in rows:
+        row.sort()
+        run = [row[0]]
+        for word in row[1:] + [None]:
+            if word is not None:
+                prev = run[-1]
+                # Measured against the taller of the two: the boxes round
+                # "A." or "Co." are tiny, and against those a credit spaced
+                # out around a middle dot fell apart into two lines.
+                if word[0] - (prev[0] + prev[2]) <= 2 * max(prev[3], word[3]):
+                    run.append(word)
+                    continue
+            text = _clean(" ".join(w[4] for w in run))
+            # One real word at least: what survives the confidence cut from a
+            # staff is chord symbols and punctuation.
+            if re.search(r"[A-Za-z]{3,}", text):
+                lines.append(HeaderLine(
+                    text,
+                    run[0][0] * scale,
+                    (run[-1][0] + run[-1][2]) * scale,
+                    min(w[1] for w in run) * scale,
+                    page_width,
+                    max(w[3] for w in run) * scale,
+                ))
+            if word is not None:
+                run = [word]
+    return lines
+
+
+def read_headers(doc, band: float) -> list[list[HeaderLine]]:
+    """Header lines for every page, from its text or, failing that, by OCR.
+
+    Rendering happens here, one page at a time, because PyMuPDF is not safe
+    to share between threads; the OCR itself is a subprocess per page and
+    runs in parallel, since a sixty-page book one page at a time is a wait.
+    """
+    lines = [header_lines(page, band) for page in doc]
+    engine = ocr_engine()
+    pictures = [i for i, page in enumerate(doc) if not _has_text(page)]
+    if engine and pictures:
+        images = [_render_band(doc[i], band) for i in pictures]
+        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 2)) as pool:
+            read = pool.map(lambda img_i: ocr_lines(img_i[0], doc[img_i[1]].rect.width, engine),
+                            zip(images, pictures))
+            for i, found in zip(pictures, read):
+                lines[i] = found
     return lines
 
 
@@ -316,8 +462,11 @@ def find_title(doc, pages_lines: list[list[HeaderLine]]) -> str:
     """
     n = len(pages_lines)
     counts: Counter[str] = Counter()
+    size: dict[str, float] = {}
     for lines in pages_lines:
         seen: set[str] = set()
+        for ln in lines:
+            size[ln.text] = max(size.get(ln.text, 0.0), ln.height)
         for text in {ln.text for ln in lines}:
             if not (2 <= len(text) <= 70) or text.isdigit():
                 continue
@@ -340,8 +489,12 @@ def find_title(doc, pages_lines: list[list[HeaderLine]]) -> str:
         counts.update(seen)
 
     if counts:
-        text, hits = counts.most_common(1)[0]
-        if hits >= max(2, n * 0.3):
+        # A subtitle -- "The 1984 Pop Hit by MICHAEL JACKSON" -- is printed on
+        # exactly the pages the title is, so the count alone is a tie, settled
+        # by whichever the dictionary happened to hold first. The title is the
+        # line set largest.
+        text = max(counts, key=lambda t: (counts[t], size.get(t, 0.0)))
+        if counts[text] >= max(2, n * 0.3):
             return text
     return _metadata_title(doc)
 
@@ -425,6 +578,31 @@ def detect_label(lines: list[HeaderLine], title: str, boilerplate: set[str]) -> 
 # --------------------------------------------------------------------------
 
 
+# Capitals worth keeping when a label is otherwise un-shouted: voicings, and
+# Roman part numbers.
+KEEP_UPPER = {"SATB", "SAB", "SSA", "SSAA", "TTBB", "TB", "SA",
+              "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
+
+
+def unshout(text: str) -> str:
+    """"TRUMPET 1" -> "Trumpet 1", when a label is set in capitals.
+
+    Capitals are typography, not spelling. Engravers commonly set the part
+    name in capitals on its first page and in ordinary case on the pages
+    that follow, and those are the same part -- grouping by the text as
+    printed made "DRUMS" and "Drums" two files, and named them in shouting.
+    Only a label that is mostly capitals is touched, so "Piano/Vocal" and
+    "SATB Choir" stay as they are.
+    """
+    upper = sum(c.isupper() for c in text)
+    lower = sum(c.islower() for c in text)
+    if upper <= lower:
+        return text
+    return re.sub(r"[A-Z]{2,}",
+                  lambda m: m.group(0) if m.group(0) in KEEP_UPPER else m.group(0).capitalize(),
+                  text)
+
+
 def normalise_name(label: str, aliases: dict[str, str]) -> str:
     """Turn a printed label into a tidy, filename-safe part name.
 
@@ -439,6 +617,7 @@ def normalise_name(label: str, aliases: dict[str, str]) -> str:
     if (again := aliases.get(text.casefold())) is not None:
         return again
 
+    text = unshout(text)
     for pattern, replacement in WORD_ABBREV:
         text = pattern.sub(replacement, text)
 
@@ -536,7 +715,7 @@ def detect_page_labels(doc, band: float, boiler_threshold: float,
     shared detection pass: the CLI groups the result into files, and the
     review UI shows it as editable page boundaries.
     """
-    pages_lines = [header_lines(page, band) for page in doc]
+    pages_lines = read_headers(doc, band)
     title = find_title(doc, pages_lines)
     boilerplate = find_boilerplate(pages_lines, boiler_threshold)
 
@@ -555,6 +734,23 @@ def detect_page_labels(doc, band: float, boiler_threshold: float,
             extra = f"   <- {raw!r}" if raw and raw != label else ""
             print(f"  page {i + 1:>3}:  {shown}{extra}", file=sys.stderr)
     return labels, title
+
+
+def looks_misread(parts: list[Part], n_pages: int) -> bool:
+    """Whether a split has the shape of detection gone wrong.
+
+    A part per page usually means the header held something unique to every
+    page -- a page number read as part of the name -- and that is what this
+    guards against: one real file came out as 58 parts of one page each.
+    But a short horn chart legitimately runs close to a page a part (nine
+    parts in thirteen pages, several of them two pages long), and warning
+    about that teaches people to ignore the warning. So it has to be many
+    parts, *and* nearly all of them a single page.
+    """
+    if len(parts) <= max(6, n_pages * 0.6):
+        return False
+    single = sum(1 for part in parts if len(part.pages) == 1)
+    return single >= len(parts) * 0.75
 
 
 def own_pages(labels: list[str | None], n_pages: int) -> list[str | None]:
@@ -894,13 +1090,17 @@ def main(argv: list[str] | None = None) -> int:
     title = args.title or detected_title or default_title(doc, args.source)
 
     if not parts:
-        text_pages = sum(1 for page in doc if page.get_text("text").strip())
-        hint = (
-            "\nThe pages have little or no text, so this is probably a scan. "
-            "Run it through OCR, or set the parts by hand with --map."
-            if text_pages < len(doc) / 2
-            else "\nTry --verbose to see what was read, or set parts with --map."
-        )
+        text_pages = sum(1 for page in doc if _has_text(page))
+        if text_pages >= len(doc) / 2:
+            hint = "\nTry --verbose to see what was read, or set parts with --map."
+        elif ocr_engine():
+            hint = ("\nThe pages are pictures with no text, and OCR could not find a "
+                    "part name in their headers. Try --verbose, or set parts with --map.")
+        else:
+            hint = ("\nThe pages are pictures with no text, so their headers need OCR. "
+                    "Install Tesseract (brew install tesseract, or on Windows "
+                    "winget install UB-Mannheim.TesseractOCR) and try again, "
+                    "or set the parts by hand with --map.")
         raise SystemExit(f"could not identify any parts in {args.source}.{hint}")
 
     # Which pages the detector accounted for, judged before --only/--exclude:
@@ -941,7 +1141,7 @@ def main(argv: list[str] | None = None) -> int:
     # A real chart has far fewer parts than pages. A part-per-page result
     # means the header held something unique to each page and detection has
     # gone wrong, so say so rather than writing 58 one-page files.
-    if source_of_truth == "page headers" and len(parts) > max(6, len(doc) * 0.6):
+    if source_of_truth == "page headers" and looks_misread(parts, len(doc)):
         print(f"warning: detected {len(parts)} parts across {len(doc)} pages, which "
               f"looks like a misread. Check --verbose, then set the parts with --map.",
               file=sys.stderr)

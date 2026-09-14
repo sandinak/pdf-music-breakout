@@ -102,11 +102,12 @@ final class AppModel: ObservableObject {
 
     // MARK: - Loading
 
-    func open(url: URL) {
-        busy = true
-        notice = nil
-        defer { busy = false }
+    /// The file being read right now, so a slower read finishing late cannot
+    /// replace a document opened after it.
+    private var opening: URL?
 
+    func open(url: URL) {
+        notice = nil
         guard let doc = PDFDocument(url: url) else {
             fail("That file could not be opened as a PDF.")
             return
@@ -120,10 +121,37 @@ final class AppModel: ObservableObject {
             return
         }
 
+        busy = true
+        opening = url
+        let pictures = (0..<doc.pageCount).filter {
+            doc.page(at: $0).map { !Detection.hasText($0) } ?? false
+        }.count
+        // Reading a scanned book means OCR on every page, which takes seconds
+        // rather than a blink -- long enough to want to know it is happening.
+        if pictures > 0 {
+            notice = "Reading \(url.lastPathComponent) — its pages are pictures, "
+                   + "so the headers are being read by OCR…"
+            noticeIsError = false
+        }
+
+        // Off the main thread: done on it, a sixty-page scan froze the window
+        // for the whole of the OCR.
+        Task.detached(priority: .userInitiated) {
+            let (labels, title) = Detection.pageLabels(doc)
+            await MainActor.run { [weak self] in
+                guard let self, self.opening == url else { return }
+                self.finishOpening(doc, url: url, labels: labels, title: title,
+                                   pictures: pictures)
+            }
+        }
+    }
+
+    private func finishOpening(_ doc: PDFDocument, url: URL, labels: [String?],
+                               title: String, pictures: Int) {
+        busy = false
+        opening = nil
         document = doc
         sourceName = url.lastPathComponent
-
-        let (labels, title) = Detection.pageLabels(doc)
         options.title = title.isEmpty ? Self.titleFromFilename(url) : title
         options.prefix = Self.prefixFromFolder(url)
 
@@ -142,11 +170,14 @@ final class AppModel: ObservableObject {
         expanded = []
         replan()
         selection = node(for: 0)
-        warnIfSuspicious(doc: doc, labels: labels)
+        notice = nil
+        warnIfSuspicious(doc: doc, pictures: pictures)
         loadThumbnails()
     }
 
     private func fail(_ message: String) {
+        busy = false
+        opening = nil
         document = nil
         pages = []
         groups = []
@@ -159,18 +190,24 @@ final class AppModel: ObservableObject {
 
     /// Detection is quiet when it goes wrong, so say so when the result looks
     /// implausible rather than letting it pass unremarked.
-    private func warnIfSuspicious(doc: PDFDocument, labels: [String?]) {
-        let textPages = (0..<doc.pageCount).reduce(0) { count, i in
-            let s = doc.page(at: i)?.string?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return count + ((s?.isEmpty == false) ? 1 : 0)
-        }
-        if textPages < doc.pageCount / 2 {
-            notice = "These pages have little or no text, so this looks like a scan. "
-                   + "Detection will be poor — tick the pages that start each part by hand."
+    private func warnIfSuspicious(doc: PDFDocument, pictures: Int) {
+        if pictures >= doc.pageCount / 2 {
+            notice = parts.isEmpty
+                ? "These pages are pictures, and OCR found no part names in their headers. "
+                  + "Drag the pages into parts by hand."
+                : "These pages are pictures, so their headers were read by OCR. "
+                  + "Check the parts before exporting."
             noticeIsError = false
-        } else if parts.count > max(6, doc.pageCount * 6 / 10) {
+            return
+        }
+        // Many parts, nearly all a single page: a page number read as part of
+        // the name, most likely. A short horn chart runs close to a page a
+        // part legitimately, and warning about that teaches people to ignore
+        // the warning.
+        let single = parts.filter { $0.pages.count == 1 }.count
+        if parts.count > max(6, doc.pageCount * 6 / 10), single * 4 >= parts.count * 3 {
             notice = "Nearly every page looks like a new part, which usually means the "
-                   + "header was misread. Check the ticks before exporting."
+                   + "header was misread. Check the parts before exporting."
             noticeIsError = false
         }
     }

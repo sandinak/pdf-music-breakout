@@ -7,6 +7,7 @@ parts with the part name printed in the top corner the way an engraver puts
 it.
 
     python tools/sample_book.py Abracadabra-ALL.pdf
+    python tools/sample_book.py --scanned Abracadabra-ALL.pdf   # no text layer
 """
 
 from __future__ import annotations
@@ -72,7 +73,28 @@ def build(path: Path, seed: int = 7) -> Path:
     return path
 
 
+def scanned(path: Path, dpi: int = 200) -> Path:
+    """Replace every page with a picture of itself, as a scan or an ePrint is.
+
+    What comes out has no text layer at all, so the only way to find a part
+    name in it is OCR -- which is the thing this exists to test.
+    """
+    source = pymupdf.open(path)
+    out = pymupdf.open()
+    for page in source:
+        pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False)
+        copy = out.new_page(width=page.rect.width, height=page.rect.height)
+        copy.insert_image(copy.rect, pixmap=pix)
+    source.close()
+    out.save(path, deflate=True)
+    out.close()
+    return path
+
+
 if __name__ == "__main__":
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else "sample-ALL.pdf")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    out = Path(args[0] if args else "sample-ALL.pdf")
     build(out)
+    if "--scanned" in sys.argv:
+        scanned(out)
     print(f"wrote {out}")
