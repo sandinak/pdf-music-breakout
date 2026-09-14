@@ -1,5 +1,6 @@
 import Foundation
 import PDFKit
+import Vision
 
 /// One instrument's part: a display name plus the pages that make it up.
 struct Part: Identifiable {
@@ -36,6 +37,8 @@ struct HeaderLine {
     let x1: CGFloat
     let yTop: CGFloat
     let pageWidth: CGFloat
+    /// How big it is set. A title is the largest type on the page.
+    var height: CGFloat = 0
 
     /// True when the line hugs the left or right page margin. Part names on
     /// continuation pages sit in the outer corner, opposite the page number.
@@ -54,6 +57,7 @@ enum Detection {
         let x1: CGFloat
         let yTop: CGFloat
         let pageWidth: CGFloat
+        var height: CGFloat = 0
     }
 
     /// The header band's text rows, in reading order.
@@ -79,8 +83,70 @@ enum Detection {
                           x0: r.minX - box.minX,
                           x1: r.maxX - box.minX,
                           yTop: box.maxY - r.maxY,
-                          pageWidth: box.width)
+                          pageWidth: box.width,
+                          height: r.height)
         }
+    }
+
+    /// Read the header band of a page that is only a picture.
+    ///
+    /// Scans, and the "ePrint" parts music publishers sell, carry no text at
+    /// all, so detection has nothing to read until something reads the
+    /// picture. Vision is part of macOS, which keeps the app free of any
+    /// dependency; the CLI does the same job with Tesseract.
+    static func ocrRows(_ image: CGImage, pageWidth: CGFloat, bandHeight: CGFloat) -> [RawRow] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        // Part names are not dictionary words: "correcting" Synth or Opt.
+        // into something English does nothing but harm.
+        request.usesLanguageCorrection = false
+        do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { return [] }
+
+        return (request.results ?? []).compactMap { observation in
+            guard let best = observation.topCandidates(1).first, best.confidence >= 0.3 else {
+                return nil
+            }
+            let text = Naming.clean(best.string)
+            // What a staff yields is short and mostly punctuation.
+            guard text.range(of: "[A-Za-z]{3,}", options: .regularExpression) != nil else {
+                return nil
+            }
+            let box = observation.boundingBox   // unit square, origin bottom-left
+            return RawRow(text: text,
+                          x0: box.minX * pageWidth,
+                          x1: box.maxX * pageWidth,
+                          yTop: (1 - box.maxY) * bandHeight,
+                          pageWidth: pageWidth,
+                          height: box.height * bandHeight)
+        }
+    }
+
+    /// The top `band` of a page as a greyscale image, for OCR.
+    static func renderBand(_ page: PDFPage, band: CGFloat) -> (CGImage, CGFloat, CGFloat)? {
+        let box = page.bounds(for: .mediaBox)
+        let bandHeight = box.height * band
+        // Part names are set small; below about 200 dpi "1" and "I" blur.
+        let scale: CGFloat = 300 / 72
+        let width = Int(box.width * scale), height = Int(bandHeight * scale)
+        guard width > 0, height > 0,
+              let ctx = CGContext(data: nil, width: width, height: height,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceGray(),
+                                  bitmapInfo: CGImageAlphaInfo.none.rawValue)
+        else { return nil }
+        ctx.setFillColor(gray: 1, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.scaleBy(x: scale, y: scale)
+        // PDF space has its origin bottom-left, so the header is its top edge.
+        ctx.translateBy(x: -box.minX, y: -(box.maxY - bandHeight))
+        page.draw(with: .mediaBox, to: ctx)
+        guard let image = ctx.makeImage() else { return nil }
+        return (image, box.width, bandHeight)
+    }
+
+    /// Whether a page has a text layer to read at all.
+    static func hasText(_ page: PDFPage) -> Bool {
+        !(page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Break a row that holds several header items into separate lines.
@@ -94,7 +160,7 @@ enum Detection {
     static func split(_ row: RawRow, title: String) -> [HeaderLine] {
         let row = trimPageNumber(row)
         let whole = HeaderLine(text: row.text, x0: row.x0, x1: row.x1,
-                               yTop: row.yTop, pageWidth: row.pageWidth)
+                               yTop: row.yTop, pageWidth: row.pageWidth, height: row.height)
         guard !title.isEmpty,
               row.text.localizedCaseInsensitiveContains(title),
               row.text.compare(title, options: .caseInsensitive) != .orderedSame
@@ -115,7 +181,8 @@ enum Detection {
                                   x0: touchesLeft ? row.x0 : middle,
                                   x1: touchesRight ? row.x1 : middle,
                                   yTop: row.yTop,
-                                  pageWidth: row.pageWidth))
+                                  pageWidth: row.pageWidth,
+                                  height: row.height))
         }
         return out.isEmpty ? [] : out
     }
@@ -141,14 +208,14 @@ enum Detection {
             guard !text.isEmpty else { return row }
             // What is left sat at the left margin; the number held the right.
             return RawRow(text: text, x0: row.x0, x1: row.x0,
-                          yTop: row.yTop, pageWidth: row.pageWidth)
+                          yTop: row.yTop, pageWidth: row.pageWidth, height: row.height)
         }
         if let number = Naming.leadingBareNumber.group(row.text, 1) {
             let text = String(row.text.dropFirst(number.count))
                 .trimmingCharacters(in: CharacterSet(charactersIn: " -–—,"))
             guard !text.isEmpty else { return row }
             return RawRow(text: text, x0: row.x1, x1: row.x1,
-                          yTop: row.yTop, pageWidth: row.pageWidth)
+                          yTop: row.yTop, pageWidth: row.pageWidth, height: row.height)
         }
         return row
     }
@@ -185,6 +252,8 @@ enum Detection {
     static func findTitle(_ doc: PDFDocument, _ pagesLines: [[HeaderLine]]) -> String {
         let n = pagesLines.count
         var counts: [String: Int] = [:]
+        var size: [String: CGFloat] = [:]
+        for line in pagesLines.joined() { size[line.text] = max(size[line.text] ?? 0, line.height) }
 
         for lines in pagesLines {
             var seen = Set<String>()
@@ -212,10 +281,15 @@ enum Detection {
             for s in seen { counts[s, default: 0] += 1 }
         }
 
-        // Highest count wins; ties break on the lexicographically smaller
-        // string so the answer is stable run to run.
+        // Highest count wins. A subtitle -- "The 1984 Pop Hit by MICHAEL
+        // JACKSON" -- is printed on exactly the pages the title is, so ties are
+        // real, and the title is the line set largest. Only then does the
+        // string itself decide, so the answer is stable run to run.
         if let best = counts.max(by: { a, b in
-            a.value != b.value ? a.value < b.value : a.key > b.key
+            if a.value != b.value { return a.value < b.value }
+            let sa = size[a.key] ?? 0, sb = size[b.key] ?? 0
+            if abs(sa - sb) > 0.5 { return sa < sb }
+            return a.key > b.key
         }) {
             if Double(best.value) >= max(2.0, Double(n) * 0.3) { return best.key }
         }
@@ -275,15 +349,32 @@ enum Detection {
     static func pageLabels(_ doc: PDFDocument,
                            band: CGFloat = headerBand) -> (labels: [String?], title: String) {
         var pagesRows: [[RawRow]] = []
+        var pictures: [(index: Int, image: CGImage, width: CGFloat, height: CGFloat)] = []
         for i in 0..<doc.pageCount {
-            pagesRows.append(doc.page(at: i).map { rawRows($0, band: band) } ?? [])
+            guard let page = doc.page(at: i) else { pagesRows.append([]); continue }
+            pagesRows.append(rawRows(page, band: band))
+            if !hasText(page), let (image, width, height) = renderBand(page, band: band) {
+                pictures.append((i, image, width, height))
+            }
+        }
+        // PDFKit draws one page at a time above; Vision reads them together,
+        // since a scanned book page by page is a long wait on open.
+        if !pictures.isEmpty {
+            var read = [[RawRow]](repeating: [], count: pictures.count)
+            let lock = NSLock()
+            DispatchQueue.concurrentPerform(iterations: pictures.count) { n in
+                let p = pictures[n]
+                let rows = ocrRows(p.image, pageWidth: p.width, bandHeight: p.height)
+                lock.lock(); read[n] = rows; lock.unlock()
+            }
+            for (n, p) in pictures.enumerated() { pagesRows[p.index] = read[n] }
         }
 
         // First pass finds the title from the rows as PDFKit reports them:
         // pages that print the title on its own line are enough to settle it.
         let unsplit = pagesRows.map { rows in
             rows.map { HeaderLine(text: $0.text, x0: $0.x0, x1: $0.x1,
-                                  yTop: $0.yTop, pageWidth: $0.pageWidth) }
+                                  yTop: $0.yTop, pageWidth: $0.pageWidth, height: $0.height) }
         }
         let title = findTitle(doc, unsplit)
 

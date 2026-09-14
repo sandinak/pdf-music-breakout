@@ -7,9 +7,11 @@ real files.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import types
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -59,6 +61,41 @@ def test_clean_strips_private_use_glyphs():
     """
     assert pmb._clean("Trumpet in B\uf062 1") == "Trumpet in B 1"
     assert pmb.normalise_name("Trumpet in B\uf062 1", pmb.DEFAULT_ALIASES) == "Trumpet1"
+
+
+def test_capitals_are_typography_not_a_different_part():
+    """Regression: "DRUMS" and "Drums" were two files.
+
+    Engravers set a part name in capitals on its first page and in ordinary
+    case on the pages after, and grouping by the text as printed split one
+    part in two -- and named both in shouting.
+    """
+    aliases = pmb.load_aliases(None, [])
+    assert pmb.normalise_name("DRUMS", aliases) == pmb.normalise_name("Drums", aliases) == "Drums"
+    assert pmb.normalise_name("TRUMPET 1", aliases) == "Trumpet1"
+    assert pmb.normalise_name("TENOR SAX", aliases) == "Tenor_Sax"
+    # Capitals that mean something stay.
+    assert pmb.normalise_name("SATB Choir", aliases) == "SATB_Choir"
+    assert pmb.normalise_name("TRUMPET II", aliases) == "TrumpetII"
+    # A label that is not mostly capitals is not touched at all.
+    assert pmb.normalise_name("Piano/Vocal Cue", aliases) == "Piano_Vocal_Cue"
+
+
+def test_a_short_chart_is_not_called_a_misread():
+    """A horn chart runs close to a page a part, and that is not a misread.
+
+    Warning about it teaches people to ignore the warning; what it is for is
+    dozens of parts of a single page each.
+    """
+    def parts(*lengths):
+        pages, out = 0, []
+        for n, length in enumerate(lengths):
+            out.append(pmb.Part(f"P{n}", f"P{n}", list(range(pages, pages + length))))
+            pages += length
+        return out
+
+    assert not pmb.looks_misread(parts(1, 1, 1, 1, 2, 2, 1, 2, 2), 13)
+    assert pmb.looks_misread(parts(*[1] * 58), 58)
 
 
 def test_windows_reserved_device_names_are_escaped():
@@ -172,6 +209,64 @@ def test_arranger_credit_never_becomes_the_title(make_pdf):
     parts, _, title = _detect(make_pdf(specs))
     assert title == "Real Title"
     assert [p.name for p in parts] == ["Score", "Piano", "Alto_Sax"]
+
+
+def test_a_subtitle_as_common_as_the_title_loses_to_the_bigger_type():
+    """Regression: the title came out as "The 1984 Pop Hit by ...".
+
+    A subtitle printed on exactly the pages the title is ties it on the
+    count, and the tie went to whichever the dictionary held first. The
+    title is the line set largest.
+
+    The same two lines are tried with the sizes swapped. Anything that
+    ignores size gives the same answer both times and so fails one of them,
+    whatever order the strings happen to hash into -- a single case caught
+    the old behaviour on only about half of runs.
+    """
+    def title(big, small):
+        page = [
+            pmb.HeaderLine(big, 200, 380, 30, 612, height=22),
+            pmb.HeaderLine(small, 220, 360, 16, 612, height=8),
+            pmb.HeaderLine("Trumpet 1", 42, 100, 50, 612, height=11),
+        ]
+        return pmb.find_title(None, [page] * 4)
+
+    a, b = "Thriller", "The 1984 Pop Hit by Somebody"
+    assert title(big=a, small=b) == a
+    assert title(big=b, small=a) == b
+
+
+def _sample_book():
+    spec = importlib.util.spec_from_file_location(
+        "sample_book", Path(__file__).resolve().parent.parent / "tools" / "sample_book.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.skipif(pmb.ocr_engine() is None, reason="Tesseract is not installed")
+def test_a_scanned_book_is_read_by_ocr(tmp_path):
+    """Pages that are only pictures -- scans, publishers' ePrints -- still split.
+
+    Built from the sample book with every page replaced by an image of
+    itself, so there is no text layer at all. It exercises the two things
+    OCR got wrong on the way: "Alto Sax 1" read as "Alto Sax 4" beside a
+    title in bigger type, and a credit line torn in half at its middle dot
+    until the fragment won the title vote.
+    """
+    sample = _sample_book()
+    path = sample.scanned(sample.build(tmp_path / "scanned.pdf"))
+    doc = pymupdf.open(path)
+    assert not any(page.get_text().strip() for page in doc), "no text layer"
+    doc.close()
+
+    parts, front, title = _detect(path)
+    assert title == "Abracadabra"
+    assert front == [0]
+    assert [p.name for p in parts] == [
+        "Score", "Piano", "Synth", "Guitar", "Bass_Guitar", "Drums",
+        "Trumpet1", "Trumpet2", "Alto_Sax1", "Tenor_Sax", "Trombone", "Clarinet1",
+    ]
 
 
 def test_running_heads_and_junk_metadata_title(make_pdf):

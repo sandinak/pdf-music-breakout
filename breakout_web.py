@@ -199,7 +199,8 @@ def analyse(state: "State", data: bytes, filename: str) -> dict:
             for i in range(len(doc))
         ],
         "scanned": text_pages < len(doc) / 2,
-        "suspect": len(grouped) > max(6, len(doc) * 0.6),
+        "ocr": text_pages < len(doc) / 2 and pmb.ocr_engine() is not None,
+        "suspect": pmb.looks_misread(grouped, len(doc)),
     }
 
 
@@ -737,9 +738,13 @@ function load(data) {
   $('opened').textContent = data.filename + ' · ' + pages.length + ' pages';
 
   let msg = '';
-  if (data.scanned)
-    msg = 'These pages have little or no text, so this looks like a scan. ' +
-          'Detection will be poor — drag the pages into the right parts by hand.';
+  if (data.scanned && data.ocr)
+    msg = 'These pages are pictures with no text, so their headers were read by OCR. ' +
+          'Check the parts before exporting.';
+  else if (data.scanned)
+    msg = 'These pages are pictures with no text, and OCR is not installed, so nothing ' +
+          'could be read. Install Tesseract and reopen the file, or drag the pages ' +
+          'into parts by hand.';
   else if (data.suspect)
     msg = 'Nearly every page looks like a new part, which usually means the ' +
           'header was misread. Check the parts below before exporting.';

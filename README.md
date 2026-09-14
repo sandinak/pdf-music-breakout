@@ -237,8 +237,9 @@ Two cases that came out of testing against real files, both handled:
   `Merged with PDFCreator Online` into the PDF. The printed page wins over the
   metadata, and known tool names are ignored outright.
 
-If detection produces about as many parts as there are pages, it says so
-rather than quietly writing a hundred one-page files.
+If detection produces dozens of parts of a single page each, it says so
+rather than quietly writing a hundred one-page files. (A short horn chart
+running close to a page a part is normal, and is left alone.)
 
 If it gets something wrong, `--verbose` shows the reasoning page by page, and
 `--map` overrides it entirely:
@@ -248,7 +249,27 @@ pdf_music_breakout.py book.pdf -o out \
     --map "2-7=Full Score" --map "8-14=Piano/Vocal"
 ```
 
-Scanned PDFs have no text to read. Run OCR first, or use `--map`.
+### Scans and ePrints
+
+Some PDFs are only pictures of pages — scans, and the "ePrint" parts music
+publishers sell — with no text in them at all. For those it reads the page
+headers by OCR, and they split like any other book:
+
+- **The Mac app** does this itself, with the text recognition built into
+  macOS. Nothing to install.
+- **The command line, the browser UI and the Windows app** use
+  [Tesseract](https://github.com/tesseract-ocr/tesseract) when it is
+  installed — `brew install tesseract` on a Mac, `apt install tesseract-ocr`
+  on Linux, `winget install UB-Mannheim.TesseractOCR` on Windows. Without it
+  they say so, and `--map` still works.
+
+A scanned book of a dozen pages takes a second or two; the pages are read in
+parallel. OCR can misread, so the review screen flags a book read this way —
+worth a glance at the parts before exporting.
+
+`make app-check` holds the two engines to the same answer: it builds the
+sample book, replaces every page with a picture of itself, and checks the Mac
+app and the CLI split it identically.
 
 ## Page size
 
@@ -269,7 +290,10 @@ identical to the source.
 ## Naming
 
 `Clarinet in Bb 1` becomes `Clarinet1`; `Alto Saxophone` becomes `Alto_Sax`;
-`Full Score` becomes `Score`. Adjust any of it:
+`Full Score` becomes `Score`. A name set in capitals — `TRUMPET 1`, as many
+engravers print it on a part's first page — is the same part as `Trumpet 1`
+on the pages after, and comes out as `Trumpet1`; voicings like `SATB` and
+Roman numerals keep their capitals. Adjust any of it:
 
 ```bash
 --rename "Drum Set=Kit"              # one-off
@@ -330,7 +354,7 @@ app reading a page number as part of an instrument's name.
 
 ### Tests
 
-71 of them. They build synthetic PDFs shaped like real engraver output and
+76 of them. They build synthetic PDFs shaped like real engraver output and
 check detection, naming, page fitting, the CLI, and the review UI (which runs
 a real server on a loopback port and is driven the way the page drives it).
 

@@ -189,12 +189,23 @@ app-install: app ## Install the app into /Applications
 app-check: $(STAMP) app-verify ## Check the app and the CLI split a sample the same way
 	@mkdir -p build
 	@$(BIN)/python tools/sample_book.py build/sample-ALL.pdf >/dev/null
-	@$(BIN)/python $(MODULE) build/sample-ALL.pdf --list \
+	@$(MAKE) --no-print-directory _compare BOOK=build/sample-ALL.pdf
+# The same book with every page a picture: Tesseract on this side, Vision in
+# the app, so this is where two OCR engines are held to the same answer.
+	@if command -v tesseract >/dev/null 2>&1; then \
+		$(BIN)/python tools/sample_book.py --scanned build/scanned-ALL.pdf >/dev/null; \
+		$(MAKE) --no-print-directory _compare BOOK=build/scanned-ALL.pdf; \
+	else \
+		echo "    (tesseract not installed: the scanned comparison was skipped)"; \
+	fi
+
+_compare:
+	@$(BIN)/python $(MODULE) $(BOOK) --list \
 		| grep -E '^  .*\.pdf' | tr -s ' ' > build/split-python.txt
-	@./build/verify build/sample-ALL.pdf \
+	@./build/verify $(BOOK) \
 		| grep -E '^  .*\.pdf' | tr -s ' ' > build/split-swift.txt
 	@diff -u build/split-python.txt build/split-swift.txt \
-		&& echo "the app and the CLI agree on `wc -l < build/split-python.txt | tr -d ' '` parts"
+		&& echo "the app and the CLI agree on `wc -l < build/split-python.txt | tr -d ' '` parts in $(notdir $(BOOK))"
 
 app-verify: ## Check the app's detection matches the Python implementation
 	@mkdir -p build
@@ -303,6 +314,6 @@ help: ## Show this help
 
 .PHONY: dev test test-v lint serve split install uninstall exe sample \
         desktop desktop-shot desktop-dist \
-        app app-run app-install app-verify app-check app-dist app-notarize \
+        app app-run app-install app-verify app-check app-dist app-notarize _compare \
         brew-tap brew-install brew-reinstall brew-test brew-uninstall \
         formula-sha dist release clean distclean help

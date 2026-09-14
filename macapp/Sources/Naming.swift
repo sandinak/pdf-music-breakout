@@ -199,6 +199,30 @@ enum Naming {
 
     /// Turn a printed label into a tidy, filename-safe part name.
     /// "Clarinet in Bb 1" -> "Clarinet1", "Alto Saxophone" -> "Alto_Sax".
+    /// Capitals worth keeping when a label is otherwise un-shouted.
+    static let keepUpper: Set<String> = ["SATB", "SAB", "SSA", "SSAA", "TTBB", "TB", "SA",
+                                         "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+
+    /// "TRUMPET 1" -> "Trumpet 1", when a label is set in capitals.
+    ///
+    /// Capitals are typography, not spelling: a part name set in capitals on
+    /// its first page and in ordinary case after that is one part, not two
+    /// files named in shouting. Only a label that is mostly capitals is
+    /// touched.
+    static func unshout(_ text: String) -> String {
+        let upper = text.filter(\.isUppercase).count
+        let lower = text.filter(\.isLowercase).count
+        guard upper > lower else { return text }
+        let words = RE(#"[A-Z]{2,}"#, caseInsensitive: false)
+        var out = text
+        for m in words.re.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let r = Range(m.range, in: out) else { continue }
+            let word = String(out[r])
+            if !keepUpper.contains(word) { out.replaceSubrange(r, with: word.capitalized) }
+        }
+        return out
+    }
+
     static func normalise(_ label: String, aliases: [String: String]) -> String {
         var text = clean(label)
         if let direct = aliases[text.lowercased()] { return direct }
@@ -206,6 +230,7 @@ enum Naming {
         text = transposition.replacing(text, with: "")
         if let again = aliases[text.lowercased()] { return again }
 
+        text = unshout(text)
         text = RE(#"\bsaxophone\b"#).replacing(text, with: "Sax")
         text = RE(#"\bsynthesi[sz]er\b"#).replacing(text, with: "Synth")
         text = RE(#"\bpercussion\b"#).replacing(text, with: "Perc")
